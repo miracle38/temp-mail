@@ -64,18 +64,16 @@ const cloudMem = {
 
 function isCloudMode() { return !!currentUser; }
 
-// 로컬스토리지에서 임시메일 관련 키 모두 제거 (로그인 시 호출)
-function clearAppLocalStorage() {
-  try {
-    const toRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key === STORAGE_KEY || key === HISTORY_KEY || key.startsWith(MSG_CACHE_PREFIX)) {
-        toRemove.push(key);
-      }
-    }
-    toRemove.forEach(k => localStorage.removeItem(k));
-  } catch {}
+// 로그인/로그아웃 전환 시 UI 초기화 헬퍼
+function resetSessionUI() {
+  currentEmail = null;
+  stopAutoRefresh();
+  clearInbox();
+  emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
+  copyBtn.disabled = true;
+  refreshBtn.disabled = true;
+  updateRetentionDisplay();
+  knownIds.clear();
 }
 
 // 메일 캐시: 로그인=메모리, 비로그인=localStorage
@@ -561,8 +559,6 @@ function bindAuthEvents() {
 }
 
 // 인증 상태 변경 처리
-let initialFirebaseSyncDone = false;
-
 function handleAuthStateChange() {
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && ALLOWED_EMAILS.indexOf(user.email) === -1) {
@@ -575,38 +571,36 @@ function handleAuthStateChange() {
     const wasLoggedIn = !!currentUser;
     currentUser = user;
     if (user) {
+      // === 로그인: 클라우드 모드 ===
       loginBtn.style.display = 'none';
       userInfo.style.display = 'flex';
       userEmailSpan.textContent = user.email;
-      // 클라우드 모드 진입 - 메모리 초기화 후 Firebase에서 전체 로드
+      // UI 초기화 (로컬 데이터 흔적 제거)
+      resetSessionUI();
+      // 클라우드에서만 로드 (localStorage는 건드리지 않음 - 로그아웃 후 복귀용)
       cloudMem.reset();
       await loadAllFromCloud();
-      // 로그인 시 로컬스토리지 제거 (클라우드가 진실 소스가 됨)
-      clearAppLocalStorage();
-      updateStorageDisplay();
-      // 최초 인증 시에만 원격 세션으로 자동 복원
-      if (!initialFirebaseSyncDone) {
-        initialFirebaseSyncDone = true;
-        await syncFromFirebase();
-        updateStorageDisplay();
+      // 클라우드의 현재 세션 복원
+      if (cloudMem.current) {
+        try { await restoreSession(cloudMem.current); } catch (e) { console.error(e); }
       }
       subscribeToRemoteHistory();
       renderHistory();
+      updateStorageDisplay();
     } else {
-      initialFirebaseSyncDone = false;
+      // === 로그아웃: 로컬 모드 ===
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
       unsubscribeRemoteHistory();
-      // 클라우드 모드 종료 - 메모리 비움 (로컬스토리지 복원 불가, 재로그인 필요)
       if (wasLoggedIn) {
+        // 클라우드 메모리 비우고 UI 초기화
         cloudMem.reset();
-        currentEmail = null;
-        emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
-        copyBtn.disabled = true;
-        refreshBtn.disabled = true;
-        clearInbox();
-        stopAutoRefresh();
-        updateRetentionDisplay();
+        resetSessionUI();
+        // localStorage의 현재 세션 복원 (있다면)
+        const localSaved = loadSession();
+        if (localSaved) {
+          try { await restoreSession(localSaved); } catch (e) { console.error(e); }
+        }
       }
       renderHistory();
       updateStorageDisplay();
@@ -616,36 +610,18 @@ function handleAuthStateChange() {
 
 // Firebase 데이터와 로컬 데이터 병합
 async function syncFromFirebase() {
-  const remote = await loadFromFirebase();
-  if (!remote) {
-    // Firebase에 데이터가 없으면 로컬 데이터를 업로드
-    syncToFirebase();
-    return;
-  }
-  const localHistory = getHistory();
-  const remoteHistory = remote.history || [];
-  // 히스토리 병합 (주소 기준 중복 제거, 최신순)
-  const merged = [...remoteHistory];
-  localHistory.forEach(l => {
-    if (!merged.find(r => r.address === l.address)) merged.push(l);
-  });
-  merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  // 클라우드 병합 시에도 MAX_HISTORY 초과분은 보관하지 않음 (오래된 것부터 잘라냄)
-  const finalHistory = merged.slice(0, MAX_HISTORY);
-  saveHistoryToStorage(finalHistory);
-  // 즉시 히스토리 렌더링 (사용자가 빠르게 본인 데이터 확인 가능)
+  // 클라우드 모드에서만 동작 (로컬과 병합하지 않음)
+  if (!isCloudMode()) return;
+  cloudMem.reset();
+  await loadAllFromCloud();
   renderHistory();
-
-  // 현재 세션: remote 우선 (최신 사용 기기의 것)
-  const targetCurrent = remote.current || loadSession();
-  if (targetCurrent && (!currentEmail || currentEmail.address !== targetCurrent.address)) {
-    showToast('클라우드에서 세션을 복원하는 중...', 'info');
-    const ok = await restoreSession(targetCurrent);
-    if (!ok) showToast('클라우드 세션이 만료되었습니다. 히스토리에서 다른 메일을 선택해주세요.', 'error');
+  // 현재 세션이 클라우드와 다르면 복원
+  if (cloudMem.current && (!currentEmail || currentEmail.address !== cloudMem.current.address)) {
+    try { await restoreSession(cloudMem.current); } catch (e) { console.error(e); }
+  } else if (!cloudMem.current && currentEmail) {
+    // 클라우드에는 세션이 없는데 로컬에는 있는 경우 UI만 초기화
+    resetSessionUI();
   }
-  renderHistory();
-  // 병합 결과를 Firebase에 다시 저장
-  syncToFirebase();
 }
 
 // 원격 히스토리 실시간 리스너 (다른 브라우저에서 삭제/추가 즉시 반영)
