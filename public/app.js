@@ -563,7 +563,13 @@ async function fetchInbox() {
 
 // 메일 목록 렌더링
 function renderInbox(messages) {
-  mailCount.textContent = messages.length;
+  const unreadCount = messages.filter(m => !m.seen).length;
+  // 배지에 "안읽음/전체" 표시
+  if (unreadCount > 0) {
+    mailCount.innerHTML = `<span class="unread-count">${unreadCount}</span> / ${messages.length}`;
+  } else {
+    mailCount.textContent = messages.length;
+  }
   if (messages.length === 0) {
     emptyState.style.display = 'block';
     inbox.querySelectorAll('.mail-item').forEach(el => el.remove());
@@ -576,12 +582,14 @@ function renderInbox(messages) {
 
   messages.forEach(msg => {
     const item = document.createElement('div');
-    item.className = 'mail-item';
-    item.onclick = () => readMessage(msg.id);
+    const isUnread = !msg.seen;
+    item.className = 'mail-item' + (isUnread ? ' unread' : ' read');
+    item.onclick = () => readMessage(msg.id, item);
 
     const fromAddr = msg.from?.address || msg.from?.name || '?';
     const initial = fromAddr[0].toUpperCase();
     item.innerHTML = `
+      <div class="mail-indicator" title="${isUnread ? '읽지 않음' : '읽음'}"></div>
       <div class="mail-avatar">${initial}</div>
       <div class="mail-content">
         <div class="mail-from">${escapeHtml(fromAddr)}</div>
@@ -593,14 +601,43 @@ function renderInbox(messages) {
   });
 }
 
+// 메일 읽음 처리 (서버 + UI)
+async function markAsRead(id, itemEl) {
+  if (itemEl && itemEl.classList.contains('unread')) {
+    itemEl.classList.remove('unread');
+    itemEl.classList.add('read');
+    // 배지 카운트 갱신
+    const unreadEls = inbox.querySelectorAll('.mail-item.unread');
+    const totalEls = inbox.querySelectorAll('.mail-item');
+    if (unreadEls.length > 0) {
+      mailCount.innerHTML = `<span class="unread-count">${unreadEls.length}</span> / ${totalEls.length}`;
+    } else {
+      mailCount.textContent = totalEls.length;
+    }
+  }
+  try {
+    await fetch(`${currentEmail.apiBase}/messages/${id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${currentEmail.token}`,
+        'Content-Type': 'application/merge-patch+json',
+      },
+      body: JSON.stringify({ seen: true }),
+    });
+  } catch { /* 실패 시 조용히 무시 */ }
+}
+
 // 메일 읽기
-async function readMessage(id) {
+async function readMessage(id, itemEl) {
   try {
     const res = await fetch(`${currentEmail.apiBase}/messages/${id}`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
     const msg = await safeJson(res);
     if (!msg) { showToast('메일을 불러오지 못했습니다'); return; }
+
+    // 읽음 처리
+    markAsRead(id, itemEl);
 
     viewerSubject.textContent = msg.subject || '(제목 없음)';
     viewerFrom.textContent = msg.from?.address || msg.from?.name || '';

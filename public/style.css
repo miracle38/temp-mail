@@ -457,18 +457,73 @@ body {
 /* 메일 아이템 */
 .mail-item {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
   padding: 14px 16px;
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid #f1f5f9;
+  position: relative;
 }
 
 .mail-item:last-child { border-bottom: none; }
 
 .mail-item:hover { background: #f8fafc; }
+
+/* 읽음/읽지 않음 인디케이터 (점) */
+.mail-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.mail-item.unread .mail-indicator {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.mail-item.read .mail-indicator {
+  background: transparent;
+  border: 2px solid #e2e8f0;
+  width: 8px;
+  height: 8px;
+}
+
+/* 안읽은 메일 강조 */
+.mail-item.unread {
+  background: #fafcff;
+}
+
+.mail-item.unread:hover {
+  background: #eff6ff;
+}
+
+.mail-item.unread .mail-from {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.mail-item.unread .mail-subject {
+  color: #334155;
+  font-weight: 500;
+}
+
+.mail-item.read .mail-from {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.mail-item.read .mail-subject {
+  color: #94a3b8;
+}
+
+/* 배지 내 안읽음 카운트 */
+.unread-count {
+  font-weight: 800;
+}
 
 .mail-avatar {
   width: 40px;
