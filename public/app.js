@@ -243,19 +243,21 @@ async function refreshAllAddresses() {
       const tokenData = await safeJson(tokenRes);
       if (!tokenData?.token) continue;
 
-      // 모든 페이지 수집
+      // 모든 페이지 수집 (fetchInbox와 동일한 fullSweep 규칙 적용)
       const allMessages = [];
-      for (let page = 1; page <= 20; page++) {
+      const MAX_PAGES = 20;
+      let fullSweep = false;
+      for (let page = 1; page <= MAX_PAGES; page++) {
         const res = await fetch(`${h.apiBase}/messages?page=${page}`, {
           headers: { Authorization: `Bearer ${tokenData.token}` },
         });
-        if (!res.ok) break;
+        if (!res.ok) break; // 부분 스윕: fullSweep 유지 (false)
         const data = await safeJson(res);
         if (!data) break;
         const msgs = data['hydra:member'] || [];
-        if (msgs.length === 0) break;
+        if (msgs.length === 0) { fullSweep = true; break; }
         allMessages.push(...msgs);
-        if (!data['hydra:view']?.['hydra:next']) break;
+        if (!data['hydra:view']?.['hydra:next']) { fullSweep = true; break; }
       }
 
       // 캐시 갱신 + 새 메일 카운트
@@ -264,10 +266,13 @@ async function refreshAllAddresses() {
       allMessages.forEach(m => {
         cache[m.id] = { ...cache[m.id], ...m, _cachedOnly: false };
       });
-      const serverIds = new Set(allMessages.map(m => m.id));
-      Object.values(cache).forEach(m => {
-        if (!serverIds.has(m.id)) m._cachedOnly = true;
-      });
+      // _cachedOnly 마킹은 전체 스윕 성공 시에만 (부분 스윕이면 기존 플래그 보존)
+      if (fullSweep) {
+        const serverIds = new Set(allMessages.map(m => m.id));
+        Object.values(cache).forEach(m => {
+          if (!serverIds.has(m.id)) m._cachedOnly = true;
+        });
+      }
       const newCount = allMessages.filter(m => !beforeIds.has(m.id)).length;
       if (newCount > 0) totalNew += newCount;
       setMessageCache(h.address, cache);
@@ -1081,13 +1086,22 @@ async function fetchInbox({ manual = false } = {}) {
   const allMessages = [];
   const MAX_PAGES = 20; // 최대 600통까지 (30 * 20)
   let firstResult = null;
+  // 전체 페이지를 자연 종료(!hydra:next or 빈 페이지)까지 다 읽었는지 여부.
+  // true일 때만 "캐시에는 있는데 서버 응답에 없는 메일"을 _cachedOnly로 마킹한다.
+  // false면 부분 스윕이므로 false-positive 방지를 위해 기존 플래그를 건드리지 않음.
+  let fullSweep = false;
+  let partialReason = null; // 'page_error' | 'max_pages' | 'bad_data'
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const result = await apiFetch(`${currentEmail.apiBase}/messages?page=${page}`);
     if (!result) return;
     if (page === 1) firstResult = result;
     if (result.error) {
-      if (page > 1) break; // 뒤 페이지 에러는 무시하고 가진 것만 사용
+      if (page > 1) {
+        // 뒤 페이지 에러: 부분 스윕으로 처리 (_cachedOnly 마킹 스킵)
+        partialReason = 'page_error';
+        break;
+      }
       // 첫 페이지 에러만 사용자에게 알림
       if (manual) {
         if (result.error === 'unauthorized') {
@@ -1103,26 +1117,48 @@ async function fetchInbox({ manual = false } = {}) {
       return;
     }
     const data = result.data;
-    if (!data) break;
+    if (!data) { partialReason = 'bad_data'; break; }
     const pageMessages = data['hydra:member'] || [];
-    if (!Array.isArray(pageMessages) || pageMessages.length === 0) break;
+    if (!Array.isArray(pageMessages) || pageMessages.length === 0) {
+      fullSweep = true; // 자연 종료 (빈 페이지)
+      break;
+    }
     allMessages.push(...pageMessages);
     // 다음 페이지가 없으면 종료
     const view = data['hydra:view'];
-    if (!view || !view['hydra:next']) break;
+    if (!view || !view['hydra:next']) {
+      fullSweep = true; // 자연 종료 (hydra:next 없음)
+      break;
+    }
+    // MAX_PAGES에 도달했는데 아직 다음 페이지가 있음 → 부분 스윕
+    if (page === MAX_PAGES) {
+      partialReason = 'max_pages';
+    }
+  }
+
+  // 부분 스윕이면 수동 새로고침 시 사용자에게 안내 (자동 새로고침은 조용히 유지)
+  if (!fullSweep && manual) {
+    if (partialReason === 'page_error') {
+      showToast('일부 페이지를 불러오지 못해 표시 상태가 불완전할 수 있습니다', 'info');
+    } else if (partialReason === 'max_pages') {
+      showToast(`메일이 ${allMessages.length}통을 넘어 일부만 확인했습니다`, 'info');
+    }
   }
 
   // 캐시와 병합: 서버에 더 이상 없어도 캐시된 메일은 유지
   const cache = getMessageCache(currentEmail.address);
-  // 새로 가져온 메일은 캐시에 추가/업데이트
+  // 새로 가져온 메일은 캐시에 추가/업데이트 (실제로 서버에서 본 메일만 _cachedOnly=false로 확정)
   allMessages.forEach(m => {
     cache[m.id] = { ...cache[m.id], ...m, _cachedOnly: false };
   });
-  // 캐시에는 있지만 이번 fetch에 없는 메일은 _cachedOnly 표시
-  const serverIds = new Set(allMessages.map(m => m.id));
-  Object.values(cache).forEach(m => {
-    if (!serverIds.has(m.id)) m._cachedOnly = true;
-  });
+  // _cachedOnly 마킹은 "전체 스윕이 성공했을 때만" 수행.
+  // 부분 스윕이면 기존 플래그 보존 (false-positive 방지)
+  if (fullSweep) {
+    const serverIds = new Set(allMessages.map(m => m.id));
+    Object.values(cache).forEach(m => {
+      if (!serverIds.has(m.id)) m._cachedOnly = true;
+    });
+  }
   setMessageCache(currentEmail.address, cache);
 
   const combined = Object.values(cache);
