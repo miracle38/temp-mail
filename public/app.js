@@ -54,14 +54,46 @@ function addressToKey(addr) {
   return addr.replace(/\./g, '_dot_').replace(/@/g, '_at_');
 }
 
-// 메일 캐시: 계정별로 받은 메일을 영구 보관 (mail.tm이 삭제해도 유지)
+// 인메모리 클라우드 미러 (로그인 시 사용 - 로컬스토리지 대신)
+const cloudMem = {
+  history: null,
+  current: null,
+  messages: {}, // { addr: { id: msg } }
+  reset() { this.history = null; this.current = null; this.messages = {}; },
+};
+
+function isCloudMode() { return !!currentUser; }
+
+// 로컬스토리지에서 임시메일 관련 키 모두 제거 (로그인 시 호출)
+function clearAppLocalStorage() {
+  try {
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key === STORAGE_KEY || key === HISTORY_KEY || key.startsWith(MSG_CACHE_PREFIX)) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+  } catch {}
+}
+
+// 메일 캐시: 로그인=메모리, 비로그인=localStorage
 function getMessageCache(address) {
+  if (isCloudMode()) {
+    return cloudMem.messages[address] || {};
+  }
   try {
     return JSON.parse(localStorage.getItem(MSG_CACHE_PREFIX + address) || '{}');
   } catch { return {}; }
 }
 
 function setMessageCache(address, cache) {
+  if (isCloudMode()) {
+    cloudMem.messages[address] = cache;
+    syncMailCacheToFirebase(address);
+    return;
+  }
   try {
     localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(cache));
   } catch (e) {
@@ -73,8 +105,54 @@ function setMessageCache(address, cache) {
       localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(reduced));
     } catch {}
   }
-  // Firebase에도 디바운스로 동기화
-  syncMailCacheToFirebase(address);
+}
+
+// 히스토리: 로그인=메모리, 비로그인=localStorage
+function saveHistoryToStorage(arr) {
+  if (isCloudMode()) {
+    cloudMem.history = arr.slice();
+    if (db && currentUser) {
+      db.ref(`tempmail/${currentUser.uid}/history`).set(cloudMem.history).catch(err => {
+        console.error('히스토리 클라우드 저장 실패', err);
+      });
+    }
+    return;
+  }
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr)); } catch {}
+}
+
+// 현재 세션: 로그인=메모리, 비로그인=localStorage
+function saveCurrentToStorage(data) {
+  if (isCloudMode()) {
+    cloudMem.current = data;
+    if (db && currentUser) {
+      if (data == null) {
+        db.ref(`tempmail/${currentUser.uid}/current`).remove().catch(() => {});
+      } else {
+        db.ref(`tempmail/${currentUser.uid}/current`).set(data).catch(err => {
+          console.error('현재 세션 클라우드 저장 실패', err);
+        });
+      }
+    }
+    return;
+  }
+  if (data == null) {
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  } else {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+  }
+}
+
+// 메일 캐시 삭제: 로그인=메모리+Firebase, 비로그인=localStorage
+function removeMessageCache(address) {
+  if (isCloudMode()) {
+    delete cloudMem.messages[address];
+    if (db && currentUser) {
+      db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(address)}`).remove().catch(() => {});
+    }
+    return;
+  }
+  try { localStorage.removeItem(MSG_CACHE_PREFIX + address); } catch {}
 }
 
 // 메일 캐시 → Firebase 동기화 (디바운스)
@@ -97,6 +175,28 @@ function syncMailCacheToFirebase(address) {
 }
 
 // Firebase에서 메일 캐시 불러오기 (로컬에 병합)
+// 클라우드 로그인 시 전체 데이터를 메모리로 로드
+async function loadAllFromCloud() {
+  if (!currentUser || !db) return;
+  try {
+    const snap = await db.ref(`tempmail/${currentUser.uid}`).get();
+    if (!snap.exists()) return;
+    const data = snap.val() || {};
+    cloudMem.history = data.history || [];
+    cloudMem.current = data.current || null;
+    // messages는 address key가 인코딩되어 있음 → 디코딩
+    cloudMem.messages = {};
+    if (data.messages) {
+      Object.keys(data.messages).forEach(k => {
+        const addr = k.replace(/_dot_/g, '.').replace(/_at_/g, '@');
+        cloudMem.messages[addr] = data.messages[k];
+      });
+    }
+  } catch (err) {
+    console.error('클라우드 전체 로드 실패', err);
+  }
+}
+
 async function loadMailCacheFromFirebase(address) {
   if (!currentUser || !db || !address) return;
   try {
@@ -104,15 +204,14 @@ async function loadMailCacheFromFirebase(address) {
     const snap = await db.ref(`tempmail/${currentUser.uid}/messages/${key}`).get();
     if (!snap.exists()) return;
     const remote = snap.val() || {};
-    const local = getMessageCache(address);
-    // 병합 (캐시본 표시는 다시 fetchInbox에서 갱신됨)
-    const merged = { ...remote, ...local };
-    Object.keys(remote).forEach(id => {
-      if (!local[id]) merged[id] = remote[id];
-    });
-    try {
-      localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(merged));
-    } catch {}
+    // 로그인 상태면 메모리에 반영, 비로그인이면 localStorage에 반영
+    if (isCloudMode()) {
+      cloudMem.messages[address] = { ...(cloudMem.messages[address] || {}), ...remote };
+    } else {
+      const local = (() => { try { return JSON.parse(localStorage.getItem(MSG_CACHE_PREFIX + address) || '{}'); } catch { return {}; } })();
+      const merged = { ...remote, ...local };
+      try { localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(merged)); } catch {}
+    }
   } catch (err) {
     console.error('메일 캐시 클라우드 로드 실패', err);
   }
@@ -275,11 +374,11 @@ try {
   db = firebase.database();
 } catch (e) { console.error('Firebase 초기화 실패', e); }
 
-// 세션 저장 (로컬 + Firebase)
+// 세션 저장 (클라우드 또는 로컬 - 로그인 상태에 따라)
 function saveSession() {
   if (!currentEmail) return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
-  // 히스토리에 추가/업데이트 (중복 방지, 최대 10개)
+  saveCurrentToStorage(currentEmail);
+  // 히스토리에 추가/업데이트 (중복 방지)
   const history = getHistory();
   const idx = history.findIndex(h => h.address === currentEmail.address);
   const entry = {
@@ -290,16 +389,12 @@ function saveSession() {
     createdAt: idx >= 0 ? history[idx].createdAt : new Date().toISOString(),
   };
   if (idx >= 0) {
-    // 기존 항목: 같은 위치에서 업데이트 (넘버링 유지)
     history[idx] = entry;
   } else {
-    // 새 항목: 맨 앞에 추가 (자동 삭제 없음)
     history.unshift(entry);
   }
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  saveHistoryToStorage(history);
   renderHistory();
-  // Firebase 동기화
-  syncToFirebase();
 }
 
 // Firebase에 동기화 (current/history 만 - messages 경로는 별도)
@@ -337,6 +432,7 @@ async function loadFromFirebase() {
 
 // 세션 복원
 function loadSession() {
+  if (isCloudMode()) return cloudMem.current;
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return null;
@@ -346,6 +442,7 @@ function loadSession() {
 
 // 히스토리 조회
 function getHistory() {
+  if (isCloudMode()) return (cloudMem.history || []).slice();
   try {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
   } catch { return []; }
@@ -475,25 +572,43 @@ function handleAuthStateChange() {
       try { await firebase.auth().signOut(); } catch {}
       return;
     }
+    const wasLoggedIn = !!currentUser;
     currentUser = user;
     if (user) {
       loginBtn.style.display = 'none';
       userInfo.style.display = 'flex';
       userEmailSpan.textContent = user.email;
+      // 클라우드 모드 진입 - 메모리 초기화 후 Firebase에서 전체 로드
+      cloudMem.reset();
+      await loadAllFromCloud();
+      // 로그인 시 로컬스토리지 제거 (클라우드가 진실 소스가 됨)
+      clearAppLocalStorage();
       updateStorageDisplay();
-      // 최초 인증 시에만 원격 세션으로 자동 복원 (그 후에는 사용자가 선택한 세션 유지)
+      // 최초 인증 시에만 원격 세션으로 자동 복원
       if (!initialFirebaseSyncDone) {
         initialFirebaseSyncDone = true;
         await syncFromFirebase();
         updateStorageDisplay();
       }
-      // 실시간 동기화 리스너 활성화
       subscribeToRemoteHistory();
+      renderHistory();
     } else {
       initialFirebaseSyncDone = false;
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
       unsubscribeRemoteHistory();
+      // 클라우드 모드 종료 - 메모리 비움 (로컬스토리지 복원 불가, 재로그인 필요)
+      if (wasLoggedIn) {
+        cloudMem.reset();
+        currentEmail = null;
+        emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
+        copyBtn.disabled = true;
+        refreshBtn.disabled = true;
+        clearInbox();
+        stopAutoRefresh();
+        updateRetentionDisplay();
+      }
+      renderHistory();
       updateStorageDisplay();
     }
   });
@@ -517,7 +632,7 @@ async function syncFromFirebase() {
   merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   // 클라우드 병합 시에도 MAX_HISTORY 초과분은 보관하지 않음 (오래된 것부터 잘라냄)
   const finalHistory = merged.slice(0, MAX_HISTORY);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(finalHistory));
+  saveHistoryToStorage(finalHistory);
   // 즉시 히스토리 렌더링 (사용자가 빠르게 본인 데이터 확인 가능)
   renderHistory();
 
@@ -547,18 +662,28 @@ function subscribeToRemoteHistory() {
     const sameSet = remoteAddrs.size === localAddrs.size && [...remoteAddrs].every(a => localAddrs.has(a));
     if (sameSet) return; // 동일하면 무시 (자기 write 반영분 포함)
 
-    // 원격에서 사라진 주소는 로컬 메일 캐시도 제거
+    // 원격에서 사라진 주소는 메일 캐시도 정리 (메모리에서만 - 원격 이미 삭제됨)
     localHistory.forEach(h => {
       if (!remoteAddrs.has(h.address)) {
-        try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+        if (isCloudMode()) {
+          delete cloudMem.messages[h.address];
+        } else {
+          try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+        }
       }
     });
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(remoteHistory));
+    // 원격 히스토리를 로컬 상태에 반영 (원격으로 다시 쓰지 않음 - 루프 방지)
+    if (isCloudMode()) {
+      cloudMem.history = remoteHistory.slice();
+    } else {
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(remoteHistory)); } catch {}
+    }
 
     // 현재 사용 중인 주소가 원격에서 삭제됐다면 세션도 해제
     if (currentEmail && !remoteAddrs.has(currentEmail.address)) {
       currentEmail = null;
-      localStorage.removeItem(STORAGE_KEY);
+      if (isCloudMode()) cloudMem.current = null;
+      else { try { localStorage.removeItem(STORAGE_KEY); } catch {} }
       emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
       copyBtn.disabled = true;
       refreshBtn.disabled = true;
@@ -658,7 +783,7 @@ async function init() {
         if (ok) {
           showToast(`${saved.address} 세션이 복원되었습니다`, 'success');
         } else {
-          localStorage.removeItem(STORAGE_KEY);
+          saveCurrentToStorage(null);
           showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.', 'error');
         }
       } catch (e) { console.error(e); }
@@ -925,7 +1050,7 @@ async function refreshToken() {
     const data = await safeJson(res);
     if (!res.ok || !data?.token) return false;
     currentEmail.token = data.token;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
+    saveCurrentToStorage(currentEmail);
     return true;
   } catch { return false; }
 }
@@ -1332,9 +1457,8 @@ function renderHistory() {
               ? { ...x, retentionAt: new Date(Date.now() - 1000).toISOString() }
               : x
           );
-          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+          saveHistoryToStorage(updated);
           renderHistory();
-          syncToFirebase();
           showToast('세션이 만료되었습니다. 캐시본은 계속 볼 수 있고, ✕ 버튼으로 삭제할 수 있습니다.', 'error');
         }
       };
@@ -1345,7 +1469,7 @@ function renderHistory() {
       // 현재 사용 중인 메일이면 현재 세션도 해제
       if (isActive) {
         currentEmail = null;
-        localStorage.removeItem(STORAGE_KEY);
+        saveCurrentToStorage(null);
         emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
         copyBtn.disabled = true;
         refreshBtn.disabled = true;
@@ -1354,14 +1478,9 @@ function renderHistory() {
         updateRetentionDisplay();
       }
       const updated = getHistory().filter(x => x.address !== h.address);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-      // 로컬 + Firebase 메일 캐시 모두 삭제
-      try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
-      if (currentUser && db) {
-        try { db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
-      }
+      saveHistoryToStorage(updated);
+      removeMessageCache(h.address);
       renderHistory();
-      syncToFirebase();
       showToast('삭제되었습니다');
     };
     list.appendChild(item);
