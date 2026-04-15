@@ -9,9 +9,32 @@
 <body>
   <div class="container">
     <header>
+      <div class="auth-bar">
+        <button id="loginBtn" class="btn btn-outline btn-sm">로그인</button>
+        <div id="userInfo" class="user-info" style="display:none;">
+          <span id="userEmail"></span>
+          <button id="logoutBtn" class="btn btn-outline btn-sm">로그아웃</button>
+        </div>
+      </div>
       <h1>임시메일</h1>
       <p class="subtitle">일회용 이메일 주소를 생성하고 메일을 받아보세요</p>
+      <p class="sync-status" id="syncStatus"></p>
     </header>
+
+    <!-- 로그인 모달 -->
+    <div class="modal-overlay" id="loginModal" style="display:none;">
+      <div class="modal">
+        <h2>로그인</h2>
+        <p class="modal-desc">로그인하면 모든 브라우저에서 임시 메일 세션이 동기화됩니다.</p>
+        <input type="email" id="loginEmail" placeholder="이메일" />
+        <input type="password" id="loginPassword" placeholder="비밀번호" />
+        <div class="modal-actions">
+          <button id="emailLoginBtn" class="btn btn-primary">이메일 로그인</button>
+          <button id="googleLoginBtn" class="btn btn-secondary">Google 로그인</button>
+        </div>
+        <button id="closeModalBtn" class="btn btn-outline">닫기</button>
+      </div>
+    </div>
 
     <!-- 메일 주소 생성 영역 -->
     <section class="email-section">
@@ -85,6 +108,10 @@
     <div class="toast" id="toast"></div>
   </div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

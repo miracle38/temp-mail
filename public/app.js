@@ -40,7 +40,30 @@ const toast = document.getElementById('toast');
 const STORAGE_KEY = 'tempmail_current';
 const HISTORY_KEY = 'tempmail_history';
 
-// 세션 저장
+// Firebase 상태
+let db = null;
+let currentUser = null;
+let fbSyncTimer = null;
+
+// 인증 관련 DOM
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const userInfo = document.getElementById('userInfo');
+const userEmailSpan = document.getElementById('userEmail');
+const loginModal = document.getElementById('loginModal');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const emailLoginBtn = document.getElementById('emailLoginBtn');
+const googleLoginBtn = document.getElementById('googleLoginBtn');
+const closeModalBtn = document.getElementById('closeModalBtn');
+const syncStatus = document.getElementById('syncStatus');
+
+// Firebase 초기화
+try {
+  db = firebase.database();
+} catch (e) { console.error('Firebase 초기화 실패', e); }
+
+// 세션 저장 (로컬 + Firebase)
 function saveSession() {
   if (!currentEmail) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
@@ -59,6 +82,36 @@ function saveSession() {
   if (history.length > 10) history.pop();
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   renderHistory();
+  // Firebase 동기화
+  syncToFirebase();
+}
+
+// Firebase에 동기화
+function syncToFirebase() {
+  if (!currentUser || !db) return;
+  clearTimeout(fbSyncTimer);
+  fbSyncTimer = setTimeout(() => {
+    const data = {
+      current: currentEmail,
+      history: getHistory(),
+      updatedAt: Date.now(),
+    };
+    db.ref(`tempmail/${currentUser.uid}`).set(data).catch(err => {
+      console.error('Firebase 저장 실패', err);
+    });
+  }, 500);
+}
+
+// Firebase에서 불러오기
+async function loadFromFirebase() {
+  if (!currentUser || !db) return null;
+  try {
+    const snap = await db.ref(`tempmail/${currentUser.uid}`).get();
+    return snap.exists() ? snap.val() : null;
+  } catch (err) {
+    console.error('Firebase 로드 실패', err);
+    return null;
+  }
 }
 
 // 세션 복원
@@ -103,6 +156,82 @@ async function restoreSession(saved) {
   } catch { return false; }
 }
 
+// 인증 이벤트 바인딩
+function bindAuthEvents() {
+  loginBtn.addEventListener('click', () => { loginModal.style.display = 'flex'; });
+  closeModalBtn.addEventListener('click', () => { loginModal.style.display = 'none'; });
+  logoutBtn.addEventListener('click', () => firebase.auth().signOut());
+  emailLoginBtn.addEventListener('click', () => {
+    const email = loginEmail.value.trim();
+    const pw = loginPassword.value;
+    if (!email || !pw) { showToast('이메일과 비밀번호를 입력하세요'); return; }
+    firebase.auth().signInWithEmailAndPassword(email, pw)
+      .then(() => { loginModal.style.display = 'none'; loginEmail.value = ''; loginPassword.value = ''; })
+      .catch(err => showToast('로그인 실패: ' + err.message));
+  });
+  googleLoginBtn.addEventListener('click', () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    firebase.auth().signInWithPopup(provider)
+      .then(() => { loginModal.style.display = 'none'; })
+      .catch(err => showToast('Google 로그인 실패: ' + err.message));
+  });
+}
+
+// 인증 상태 변경 처리
+function handleAuthStateChange() {
+  firebase.auth().onAuthStateChanged(async (user) => {
+    if (user && ALLOWED_EMAILS.indexOf(user.email) === -1) {
+      alert('허용되지 않은 계정입니다.');
+      firebase.auth().signOut();
+      return;
+    }
+    currentUser = user;
+    if (user) {
+      loginBtn.style.display = 'none';
+      userInfo.style.display = 'flex';
+      userEmailSpan.textContent = user.email;
+      syncStatus.innerHTML = '<span class="sync-on">☁️ 클라우드 동기화 중</span>';
+      // Firebase에서 데이터 로드 및 병합
+      await syncFromFirebase();
+    } else {
+      loginBtn.style.display = 'inline-block';
+      userInfo.style.display = 'none';
+      syncStatus.innerHTML = '<span class="sync-off">💾 로컬 저장소 사용 중 (로그인 시 동기화)</span>';
+    }
+  });
+}
+
+// Firebase 데이터와 로컬 데이터 병합
+async function syncFromFirebase() {
+  const remote = await loadFromFirebase();
+  if (!remote) {
+    // Firebase에 데이터가 없으면 로컬 데이터를 업로드
+    syncToFirebase();
+    return;
+  }
+  const localHistory = getHistory();
+  const remoteHistory = remote.history || [];
+  // 히스토리 병합 (주소 기준 중복 제거, 최신순)
+  const merged = [...remoteHistory];
+  localHistory.forEach(l => {
+    if (!merged.find(r => r.address === l.address)) merged.push(l);
+  });
+  merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const finalHistory = merged.slice(0, 10);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(finalHistory));
+
+  // 현재 세션: remote 우선 (최신 사용 기기의 것)
+  const targetCurrent = remote.current || loadSession();
+  if (targetCurrent && (!currentEmail || currentEmail.address !== targetCurrent.address)) {
+    showToast('클라우드에서 세션을 복원하는 중...');
+    const ok = await restoreSession(targetCurrent);
+    if (!ok) showToast('클라우드 세션이 만료되어 있습니다');
+  }
+  renderHistory();
+  // 병합 결과를 Firebase에 다시 저장
+  syncToFirebase();
+}
+
 // 초기화
 async function init() {
   await loadDomains();
@@ -113,6 +242,8 @@ async function init() {
   autoRefreshCheck.addEventListener('change', toggleAutoRefresh);
   refreshBtn.addEventListener('click', fetchInbox);
   backBtn.addEventListener('click', closeViewer);
+  bindAuthEvents();
+  handleAuthStateChange();
 
   // 저장된 세션 복원
   const saved = loadSession();
