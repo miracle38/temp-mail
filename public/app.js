@@ -113,21 +113,10 @@ async function loadMailCacheFromFirebase(address) {
   }
 }
 
-// 만료된 히스토리/캐시 정리 (retentionAt이 지난 메일 주소)
-async function pruneExpiredAccounts() {
-  const now = new Date();
-  const history = getHistory();
-  const valid = history.filter(h => !h.retentionAt || new Date(h.retentionAt) > now);
-  if (valid.length === history.length) return 0;
-  const expired = history.filter(h => h.retentionAt && new Date(h.retentionAt) <= now);
-  for (const h of expired) {
-    try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
-    if (currentUser && db) {
-      try { await db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
-    }
-  }
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(valid));
-  return expired.length;
+// 만료 여부 판정 (자동 삭제는 하지 않음)
+function isExpired(retentionAt) {
+  if (!retentionAt) return false;
+  return new Date(retentionAt) <= new Date();
 }
 
 // Firebase 상태
@@ -327,8 +316,6 @@ function handleAuthStateChange() {
       if (!initialFirebaseSyncDone) {
         initialFirebaseSyncDone = true;
         await syncFromFirebase();
-        // Firebase에 있는 만료된 메일 캐시도 정리
-        try { await pruneExpiredAccounts(); } catch {}
       }
     } else {
       initialFirebaseSyncDone = false;
@@ -373,11 +360,6 @@ async function syncFromFirebase() {
 
 // 초기화
 async function init() {
-  // 만료된 계정 / 메일 캐시 정리
-  try {
-    const removed = await pruneExpiredAccounts();
-    if (removed > 0) showToast(`만료된 메일 주소 ${removed}개를 정리했습니다`, 'info');
-  } catch {}
   // UI 이벤트는 가장 먼저 바인딩 (네트워크 오류와 무관하게 동작하도록)
   generateBtn.addEventListener('click', generateEmail);
   copyBtn.addEventListener('click', copyEmail);
@@ -1034,34 +1016,38 @@ function renderHistory() {
   list.innerHTML = '';
   history.forEach((h, index) => {
     const isActive = currentEmail && currentEmail.address === h.address;
+    const expired = isExpired(h.retentionAt);
     const item = document.createElement('div');
-    item.className = 'history-item' + (isActive ? ' active' : '');
+    item.className = 'history-item' + (isActive ? ' active' : '') + (expired ? ' expired' : '');
+    const switchLabel = isActive ? '사용 중' : (expired ? '만료' : '전환');
+    const switchDisabled = (isActive || expired) ? 'disabled' : '';
+    const expiredBadge = expired ? '<span class="expired-badge" title="유효기간 만료">[만료]</span>' : '';
     item.innerHTML = `
       <span class="history-num">${index + 1}</span>
-      <span class="history-addr">${escapeHtml(h.address)}</span>
+      <span class="history-addr">${escapeHtml(h.address)} ${expiredBadge}</span>
       <span class="history-date">${formatDate(h.createdAt)}</span>
-      <button class="btn btn-outline btn-sm history-switch" ${isActive ? 'disabled' : ''}>${isActive ? '사용 중' : '전환'}</button>
+      <button class="btn btn-outline btn-sm history-switch" ${switchDisabled}>${switchLabel}</button>
       <button class="btn btn-danger btn-sm history-delete" title="삭제">✕</button>
     `;
-    if (!isActive) {
+    if (!isActive && !expired) {
       item.querySelector('.history-switch').onclick = async (e) => {
         e.stopPropagation();
-        showToast('세션 전환 중...');
+        showToast('세션 전환 중...', 'info');
         const ok = await restoreSession(h);
         if (ok) {
           saveSession();
-          showToast(`${h.address}로 전환되었습니다`);
+          showToast(`${h.address}로 전환되었습니다`, 'success');
         } else {
-          showToast('세션이 만료되었습니다. 새 메일을 생성해주세요.');
-          // 만료된 항목 제거 + 메일 캐시 정리
-          const updated = getHistory().filter(x => x.address !== h.address);
+          // 토큰 발급은 실패했지만 자동 삭제하지 않음 - 만료 표시만 갱신
+          const updated = getHistory().map(x =>
+            x.address === h.address
+              ? { ...x, retentionAt: new Date(Date.now() - 1000).toISOString() }
+              : x
+          );
           localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-          try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
-          if (currentUser && db) {
-            try { db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
-          }
           renderHistory();
           syncToFirebase();
+          showToast('세션이 만료되었습니다. 캐시본은 계속 볼 수 있고, ✕ 버튼으로 삭제할 수 있습니다.', 'error');
         }
       };
     }
