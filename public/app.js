@@ -1522,20 +1522,60 @@ async function readMessage(id, itemEl) {
     }
 
     // 사이드바 레이아웃: 뷰어 표시 시 목록 숨김
+    const wasHidden = viewerSection.style.display === 'none' || viewerSection.style.display === '';
     inbox.style.display = 'none';
     viewerSection.style.display = 'flex';
     updateMailNavigation();
+    // 뷰어가 처음 열릴 때만 히스토리 상태 푸시 (마우스 뒤로가기/브라우저 뒤로가기로 목록 복귀 가능)
+    // 메일 간 네비게이션(↑↓)에서는 이미 푸시된 상태를 유지
+    if (wasHidden) pushViewerHistory();
   } catch {
     showToast('메일을 불러오지 못했습니다');
   }
 }
 
+// 히스토리 연동: 뷰어 열림 상태를 1단계 히스토리로 취급
+let _viewerHistoryPushed = false;
+let _closingViaPopstate = false;
+
+function pushViewerHistory() {
+  if (!_viewerHistoryPushed) {
+    try { history.pushState({ tempmailViewer: true }, ''); } catch {}
+    _viewerHistoryPushed = true;
+  }
+}
+
 // 뷰어 닫기 (목록으로 복귀)
+// - 버튼/키보드로 닫을 때: history.back()으로 푸시한 상태 되돌림 → popstate가 실제 UI 변경
+// - 마우스 뒤로가기/브라우저 뒤로가기로 닫을 때: popstate → 이 함수 직접 호출
 function closeViewer() {
+  // 이미 popstate로 진입한 경우는 바로 UI만 닫고 종료
+  if (_closingViaPopstate) {
+    viewerSection.style.display = 'none';
+    inbox.style.display = 'block';
+    currentMailIndex = -1;
+    _viewerHistoryPushed = false;
+    return;
+  }
+  // 버튼/키보드 경로: 푸시된 상태가 있으면 history.back() 호출 → popstate에서 UI 닫힘
+  if (_viewerHistoryPushed) {
+    history.back();
+    return;
+  }
+  // 푸시 안 된 상태면 직접 UI만 닫기 (예외 경로 안전장치)
   viewerSection.style.display = 'none';
   inbox.style.display = 'block';
   currentMailIndex = -1;
 }
+
+// popstate: 마우스 뒤로가기 버튼, 브라우저 뒤로가기, 또는 closeViewer의 history.back() 호출 시 발생
+window.addEventListener('popstate', () => {
+  const viewerOpen = viewerSection.style.display !== 'none' && viewerSection.style.display !== '';
+  if (viewerOpen) {
+    _closingViaPopstate = true;
+    try { closeViewer(); } finally { _closingViaPopstate = false; }
+  }
+});
 
 // 자동 새로고침
 function startAutoRefresh() {
@@ -1661,6 +1701,11 @@ function clearInbox() {
   mailCount.textContent = '0';
   viewerSection.style.display = 'none';
   inbox.style.display = 'block';
+  // 세션 전환/초기화 시 푸시된 뷰어 히스토리도 정리
+  if (_viewerHistoryPushed) {
+    _viewerHistoryPushed = false;
+    try { history.back(); } catch {}
+  }
 }
 
 // 유틸: HTML 이스케이프
