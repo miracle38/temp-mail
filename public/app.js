@@ -325,6 +325,25 @@ function bindAuthEvents() {
     if (!confirm('로그아웃 하시겠습니까?\n(클라우드 동기화가 중단되고 로컬 저장소만 사용됩니다)')) return;
     firebase.auth().signOut();
   });
+  // 수동 클라우드 동기화 (현재 로컬 데이터를 무시하고 클라우드에서 다시 불러오기)
+  const cloudSyncBtn = document.getElementById('cloudSyncBtn');
+  if (cloudSyncBtn) {
+    cloudSyncBtn.addEventListener('click', async () => {
+      if (!currentUser) { showToast('로그인 후 사용 가능합니다', 'error'); return; }
+      cloudSyncBtn.disabled = true;
+      cloudSyncBtn.textContent = '⏳ 동기화 중...';
+      try {
+        await syncFromFirebase();
+        await updateStorageDisplay();
+        showToast('클라우드에서 다시 불러왔습니다', 'success');
+      } catch (e) {
+        showToast('동기화 실패: ' + (e.message || ''), 'error');
+      } finally {
+        cloudSyncBtn.disabled = false;
+        cloudSyncBtn.innerHTML = '🔄 동기화';
+      }
+    });
+  }
   // 로그인 입력 필드에서 Enter 키 → 이메일 로그인
   const submitLogin = (e) => {
     if (e.key === 'Enter') {
@@ -422,17 +441,38 @@ async function syncFromFirebase() {
   // 클라우드 병합 시에도 MAX_HISTORY 초과분은 보관하지 않음 (오래된 것부터 잘라냄)
   const finalHistory = merged.slice(0, MAX_HISTORY);
   localStorage.setItem(HISTORY_KEY, JSON.stringify(finalHistory));
+  // 즉시 히스토리 렌더링 (사용자가 빠르게 본인 데이터 확인 가능)
+  renderHistory();
 
   // 현재 세션: remote 우선 (최신 사용 기기의 것)
   const targetCurrent = remote.current || loadSession();
   if (targetCurrent && (!currentEmail || currentEmail.address !== targetCurrent.address)) {
-    showToast('클라우드에서 세션을 복원하는 중...');
+    showToast('클라우드에서 세션을 복원하는 중...', 'info');
     const ok = await restoreSession(targetCurrent);
-    if (!ok) showToast('클라우드 세션이 만료되어 있습니다');
+    if (!ok) showToast('클라우드 세션이 만료되었습니다. 히스토리에서 다른 메일을 선택해주세요.', 'error');
   }
   renderHistory();
   // 병합 결과를 Firebase에 다시 저장
   syncToFirebase();
+}
+
+// Firebase 인증 상태가 결정될 때까지 대기 (로컬/클라우드 복원 경쟁 조건 방지)
+function waitForAuthReady(timeoutMs = 4000) {
+  return new Promise(resolve => {
+    let resolved = false;
+    const t = setTimeout(() => { if (!resolved) { resolved = true; resolve(null); } }, timeoutMs);
+    try {
+      const unsub = firebase.auth().onAuthStateChanged(user => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(t);
+        try { unsub(); } catch {}
+        resolve(user);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 // 초기화
@@ -462,23 +502,28 @@ async function init() {
   handleAuthStateChange();
   renderHistory();
 
-  // 네트워크 의존 작업들
+  // 도메인 + 인증 상태 동시 로딩
   try { await loadDomains(); } catch (e) { console.error(e); }
+  const initialUser = await waitForAuthReady();
 
-  // 저장된 세션 복원
-  const saved = loadSession();
-  if (saved) {
-    showToast('이전 메일 세션을 복원하는 중...');
-    try {
-      const ok = await restoreSession(saved);
-      if (ok) {
-        showToast(`${saved.address} 세션이 복원되었습니다`);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-        showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.');
-      }
-    } catch (e) { console.error(e); }
+  // 로그인 상태면 클라우드 동기화 결과를 우선 사용 (handleAuthStateChange가 처리 중)
+  // 비로그인 상태면 로컬 세션 복원
+  if (!initialUser) {
+    const saved = loadSession();
+    if (saved) {
+      showToast('이전 메일 세션을 복원하는 중...', 'info');
+      try {
+        const ok = await restoreSession(saved);
+        if (ok) {
+          showToast(`${saved.address} 세션이 복원되었습니다`, 'success');
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+          showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.', 'error');
+        }
+      } catch (e) { console.error(e); }
+    }
   }
+  // 로그인 상태일 때는 handleAuthStateChange → syncFromFirebase가 알아서 복원
 }
 
 // 도메인 목록 로드 (모든 API에서 수집)
