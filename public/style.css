@@ -4,30 +4,57 @@
   box-sizing: border-box;
 }
 
+html, body {
+  height: 100%;
+}
+
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
   background: #0f172a;
   color: #e2e8f0;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-.container {
-  max-width: 800px;
+/* 상단 헤더 */
+.top-header {
+  background: #0b1220;
+  border-bottom: 1px solid #1e293b;
+  padding: 14px 24px;
+  flex-shrink: 0;
+}
+
+.top-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: 40px 20px;
 }
 
-/* 헤더 */
-header {
-  text-align: center;
-  margin-bottom: 40px;
-  position: relative;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
+
+.brand h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.sync-status {
+  font-size: 0.75rem;
+}
+
+.sync-on { color: #10b981; }
+.sync-off { color: #64748b; }
 
 .auth-bar {
-  position: absolute;
-  top: 0;
-  right: 0;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -41,111 +68,51 @@ header {
   color: #94a3b8;
 }
 
-.sync-status {
-  font-size: 0.8rem;
-  margin-top: 8px;
-}
-
-.sync-on {
-  color: #10b981;
-}
-
-.sync-off {
-  color: #64748b;
-}
-
-/* 모달 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
+/* 레이아웃: 좌측 사이드바 + 우측 메인 */
+.layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1600px;
   width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
+  margin: 0 auto;
+  min-height: 0;
 }
 
-.modal {
+.sidebar, .main-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+/* 공통 섹션 */
+.email-section,
+.history-section,
+.inbox-wrapper {
   background: #1e293b;
   border-radius: 16px;
-  padding: 30px;
   border: 1px solid #334155;
-  width: 90%;
-  max-width: 400px;
 }
 
-.modal h2 {
-  margin-bottom: 10px;
-  font-size: 1.3rem;
-}
-
-.modal-desc {
-  font-size: 0.85rem;
-  color: #94a3b8;
-  margin-bottom: 20px;
-}
-
-.modal input {
-  width: 100%;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 10px 14px;
-  color: #e2e8f0;
-  font-size: 0.95rem;
-  margin-bottom: 10px;
-}
-
-.modal input:focus {
-  outline: none;
-  border-color: #6366f1;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  margin: 15px 0;
-  flex-wrap: wrap;
-}
-
-.modal-actions .btn {
-  flex: 1;
-  min-width: 120px;
-}
-
-header h1 {
-  font-size: 2.5rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 8px;
-}
-
-.subtitle {
-  color: #94a3b8;
-  font-size: 1rem;
+.email-section {
+  padding: 20px;
 }
 
 /* 버튼 */
 .btn {
-  padding: 10px 20px;
+  padding: 10px 18px;
   border: none;
   border-radius: 8px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-primary {
   background: linear-gradient(135deg, #3b82f6, #6366f1);
@@ -158,14 +125,12 @@ header h1 {
 }
 
 .btn-secondary {
-  background: #1e293b;
+  background: #0f172a;
   color: #e2e8f0;
   border: 1px solid #334155;
 }
 
-.btn-secondary:hover:not(:disabled) {
-  background: #334155;
-}
+.btn-secondary:hover:not(:disabled) { background: #334155; }
 
 .btn-outline {
   background: transparent;
@@ -178,27 +143,42 @@ header h1 {
   color: #e2e8f0;
 }
 
-/* 메일 주소 섹션 */
-.email-section {
-  background: #1e293b;
-  border-radius: 16px;
-  padding: 30px;
-  margin-bottom: 20px;
-  border: 1px solid #334155;
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 
+.btn-danger {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #7f1d1d;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+/* 메일 주소 표시 */
 .email-display {
   background: #0f172a;
   border-radius: 10px;
-  padding: 20px;
+  padding: 16px;
   text-align: center;
-  font-size: 1.4rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #38bdf8;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   border: 1px solid #334155;
   word-break: break-all;
-  min-height: 66px;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -207,55 +187,39 @@ header h1 {
 .email-display .placeholder {
   color: #475569;
   font-weight: 400;
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 .retention-info {
   text-align: center;
-  font-size: 0.85rem;
-  color: #94a3b8;
-  margin-bottom: 16px;
-  min-height: 20px;
-}
-
-.retention-info:empty {
-  display: none;
-}
-
-.retention-label {
-  color: #64748b;
-}
-
-.retention-remaining {
-  color: #fbbf24;
-  font-weight: 600;
-}
-
-.retention-date {
-  color: #475569;
   font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 14px;
+  min-height: 18px;
 }
 
-.retention-expired {
-  color: #ef4444;
-  font-weight: 600;
-}
+.retention-info:empty { display: none; }
+
+.retention-label { color: #64748b; }
+.retention-remaining { color: #fbbf24; font-weight: 600; }
+.retention-date { color: #475569; font-size: 0.75rem; }
+.retention-expired { color: #ef4444; font-weight: 600; }
 
 .email-actions {
   display: flex;
-  gap: 10px;
-  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
+.email-actions .btn { flex: 1; min-width: 90px; }
+
 .custom-email {
-  margin-top: 20px;
-  padding-top: 20px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid #334155;
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
 }
 
 .custom-input-group {
@@ -268,20 +232,18 @@ header h1 {
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 9px 12px;
   color: #e2e8f0;
-  font-size: 0.95rem;
-  width: 160px;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 0;
 }
 
-.custom-input-group input:focus {
-  outline: none;
-  border-color: #6366f1;
-}
+.custom-input-group input:focus { outline: none; border-color: #6366f1; }
 
 .custom-input-group span {
   color: #64748b;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
@@ -289,89 +251,58 @@ header h1 {
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 9px 10px;
   color: #e2e8f0;
-  font-size: 0.95rem;
-}
-
-.custom-input-group select:focus {
-  outline: none;
-  border-color: #6366f1;
-}
-
-/* 새로고침 섹션 */
-.refresh-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-  padding: 0 4px;
-}
-
-.auto-refresh {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #94a3b8;
   font-size: 0.85rem;
-  cursor: pointer;
-  user-select: none;
+  max-width: 140px;
 }
 
-.auto-refresh input[type="checkbox"] {
-  accent-color: #6366f1;
-  width: 16px;
-  height: 16px;
-}
-
-.timer {
-  color: #475569;
-  font-size: 0.8rem;
-  margin-left: auto;
-}
+.custom-input-group select:focus { outline: none; border-color: #6366f1; }
 
 /* 이전 메일 히스토리 */
 .history-section {
-  background: #1e293b;
-  border-radius: 16px;
-  padding: 20px 24px;
-  margin-bottom: 20px;
-  border: 1px solid #334155;
+  padding: 16px 18px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
 }
 
 .history-section h2 {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   color: #94a3b8;
+}
+
+.history-list {
+  overflow-y: auto;
+  flex: 1;
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 8px 10px;
   border-radius: 8px;
   border-bottom: 1px solid #293548;
 }
 
-.history-item:last-child {
-  border-bottom: none;
-}
+.history-item:last-child { border-bottom: none; }
 
-.history-item.active {
-  background: #293548;
-}
+.history-item.active { background: #293548; }
 
 .history-num {
-  min-width: 24px;
-  height: 24px;
+  min-width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #334155;
   color: #94a3b8;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
   border-radius: 50%;
   flex-shrink: 0;
@@ -384,68 +315,88 @@ header h1 {
 
 .history-addr {
   flex: 1;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: #38bdf8;
   word-break: break-all;
+  min-width: 0;
 }
 
 .history-date {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #475569;
   white-space: nowrap;
+  display: none;
 }
 
-.btn-sm {
-  padding: 5px 12px;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.btn-danger {
-  background: transparent;
-  color: #ef4444;
-  border: 1px solid #7f1d1d;
-  padding: 5px 10px;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: #7f1d1d;
-  color: #fecaca;
-}
-
-/* 받은 메일함 */
-.inbox-section {
+/* 새로고침/헤더 바 */
+.refresh-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
   background: #1e293b;
   border-radius: 16px;
-  padding: 24px;
   border: 1px solid #334155;
+  flex-wrap: wrap;
 }
 
-.inbox-section h2 {
+.panel-title {
   font-size: 1.1rem;
   font-weight: 600;
-  margin-bottom: 16px;
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-right: auto;
 }
 
 .badge {
   background: #6366f1;
   color: white;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   padding: 2px 10px;
   border-radius: 20px;
   font-weight: 600;
 }
 
+.auto-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-refresh input[type="checkbox"] {
+  accent-color: #6366f1;
+  width: 15px;
+  height: 15px;
+}
+
+.timer {
+  color: #475569;
+  font-size: 0.75rem;
+}
+
+/* 받은 메일함 + 뷰어 */
+.inbox-wrapper {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .inbox {
-  min-height: 100px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
 }
 
 .empty-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 60px 20px;
   color: #475569;
 }
 
@@ -454,34 +405,25 @@ header h1 {
   margin-bottom: 12px;
 }
 
-.empty-state p {
-  margin-bottom: 4px;
-}
+.empty-state p { margin-bottom: 4px; }
 
-.hint {
-  font-size: 0.85rem;
-  color: #334155;
-}
+.hint { font-size: 0.85rem; color: #334155; }
 
 /* 메일 아이템 */
 .mail-item {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 16px;
+  padding: 14px 16px;
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid #293548;
 }
 
-.mail-item:last-child {
-  border-bottom: none;
-}
+.mail-item:last-child { border-bottom: none; }
 
-.mail-item:hover {
-  background: #293548;
-}
+.mail-item:hover { background: #293548; }
 
 .mail-avatar {
   width: 40px;
@@ -504,7 +446,7 @@ header h1 {
 
 .mail-from {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -513,7 +455,7 @@ header h1 {
 
 .mail-subject {
   color: #94a3b8;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -521,30 +463,31 @@ header h1 {
 
 .mail-date {
   color: #475569;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   white-space: nowrap;
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 /* 메일 뷰어 */
 .viewer-section {
-  background: #1e293b;
-  border-radius: 16px;
-  padding: 24px;
-  margin-top: 20px;
-  border: 1px solid #334155;
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .viewer-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
 .viewer-header h2 {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 600;
   flex: 1;
   word-break: break-word;
@@ -553,49 +496,46 @@ header h1 {
 .viewer-meta {
   background: #0f172a;
   border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 20px;
-  font-size: 0.9rem;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.viewer-meta strong {
-  color: #64748b;
-}
+.viewer-meta strong { color: #64748b; }
 
 .viewer-body {
   background: #ffffff;
   color: #1e293b;
   border-radius: 10px;
-  padding: 24px;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  overflow-x: auto;
+  padding: 20px;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  overflow: auto;
   word-break: break-word;
+  flex: 1;
+  min-height: 0;
 }
 
-.viewer-body img {
-  max-width: 100%;
-  height: auto;
-}
+.viewer-body img { max-width: 100%; height: auto; }
 
 .viewer-attachments {
-  margin-top: 20px;
-  padding-top: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid #334155;
+  flex-shrink: 0;
 }
 
 .viewer-attachments h3 {
-  font-size: 0.95rem;
-  margin-bottom: 10px;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
   color: #94a3b8;
 }
 
-.viewer-attachments ul {
-  list-style: none;
-}
+.viewer-attachments ul { list-style: none; }
 
 .viewer-attachments li {
   padding: 8px 12px;
@@ -607,11 +547,65 @@ header h1 {
 .viewer-attachments a {
   color: #38bdf8;
   text-decoration: none;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
-.viewer-attachments a:hover {
-  text-decoration: underline;
+.viewer-attachments a:hover { text-decoration: underline; }
+
+/* 모달 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 28px;
+  border: 1px solid #334155;
+  width: 90%;
+  max-width: 400px;
+}
+
+.modal h2 { margin-bottom: 8px; font-size: 1.2rem; }
+
+.modal-desc {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin-bottom: 18px;
+}
+
+.modal input {
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+}
+
+.modal input:focus { outline: none; border-color: #6366f1; }
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+
+.modal-actions .btn {
+  flex: 1;
+  min-width: 120px;
 }
 
 /* 토스트 알림 */
@@ -655,35 +649,18 @@ header h1 {
 }
 
 /* 반응형 */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar { max-height: none; }
+  .history-section { min-height: 150px; max-height: 300px; }
+  .main-panel { min-height: 500px; }
+}
+
 @media (max-width: 600px) {
-  .container {
-    padding: 20px 12px;
-  }
-
-  header h1 {
-    font-size: 1.8rem;
-  }
-
-  .email-display {
-    font-size: 1rem;
-    padding: 16px;
-  }
-
-  .email-actions {
-    flex-wrap: wrap;
-  }
-
-  .btn {
-    padding: 10px 16px;
-    font-size: 0.85rem;
-  }
-
-  .refresh-section {
-    flex-wrap: wrap;
-  }
-
-  .viewer-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+  .top-header { padding: 10px 14px; }
+  .brand h1 { font-size: 1.3rem; }
+  .layout { padding: 12px; gap: 12px; }
+  .email-actions .btn { font-size: 0.8rem; padding: 9px 12px; }
 }

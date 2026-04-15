@@ -580,16 +580,18 @@ async function readMessage(id) {
       viewerAttachments.style.display = 'none';
     }
 
-    viewerSection.style.display = 'block';
-    viewerSection.scrollIntoView({ behavior: 'smooth' });
+    // 사이드바 레이아웃: 뷰어 표시 시 목록 숨김
+    inbox.style.display = 'none';
+    viewerSection.style.display = 'flex';
   } catch {
     showToast('메일을 불러오지 못했습니다');
   }
 }
 
-// 뷰어 닫기
+// 뷰어 닫기 (목록으로 복귀)
 function closeViewer() {
   viewerSection.style.display = 'none';
+  inbox.style.display = 'block';
 }
 
 // 자동 새로고침
@@ -692,6 +694,7 @@ function clearInbox() {
   emptyState.style.display = 'block';
   mailCount.textContent = '0';
   viewerSection.style.display = 'none';
+  inbox.style.display = 'block';
 }
 
 // 유틸: HTML 이스케이프

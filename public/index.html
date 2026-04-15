@@ -7,8 +7,12 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <header>
+  <header class="top-header">
+    <div class="top-inner">
+      <div class="brand">
+        <h1>임시메일</h1>
+        <span class="sync-status" id="syncStatus"></span>
+      </div>
       <div class="auth-bar">
         <button id="loginBtn" class="btn btn-outline btn-sm">로그인</button>
         <div id="userInfo" class="user-info" style="display:none;">
@@ -16,97 +20,95 @@
           <button id="logoutBtn" class="btn btn-outline btn-sm">로그아웃</button>
         </div>
       </div>
-      <h1>임시메일</h1>
-      <p class="subtitle">일회용 이메일 주소를 생성하고 메일을 받아보세요</p>
-      <p class="sync-status" id="syncStatus"></p>
-    </header>
-
-    <!-- 로그인 모달 -->
-    <div class="modal-overlay" id="loginModal" style="display:none;">
-      <div class="modal">
-        <h2>로그인</h2>
-        <p class="modal-desc">로그인하면 모든 브라우저에서 임시 메일 세션이 동기화됩니다.</p>
-        <input type="email" id="loginEmail" placeholder="이메일" />
-        <input type="password" id="loginPassword" placeholder="비밀번호" />
-        <div class="modal-actions">
-          <button id="emailLoginBtn" class="btn btn-primary">이메일 로그인</button>
-          <button id="googleLoginBtn" class="btn btn-secondary">Google 로그인</button>
-        </div>
-        <button id="closeModalBtn" class="btn btn-outline">닫기</button>
-      </div>
     </div>
+  </header>
 
-    <!-- 메일 주소 생성 영역 -->
-    <section class="email-section">
-      <div class="email-display" id="emailDisplay">
-        <span class="placeholder">메일 주소를 생성하세요</span>
+  <!-- 로그인 모달 -->
+  <div class="modal-overlay" id="loginModal" style="display:none;">
+    <div class="modal">
+      <h2>로그인</h2>
+      <p class="modal-desc">로그인하면 모든 브라우저에서 임시 메일 세션이 동기화됩니다.</p>
+      <input type="email" id="loginEmail" placeholder="이메일" />
+      <input type="password" id="loginPassword" placeholder="비밀번호" />
+      <div class="modal-actions">
+        <button id="emailLoginBtn" class="btn btn-primary">이메일 로그인</button>
+        <button id="googleLoginBtn" class="btn btn-secondary">Google 로그인</button>
       </div>
-      <div class="retention-info" id="retentionInfo"></div>
-      <div class="email-actions">
-        <button id="generateBtn" class="btn btn-primary">새 메일 생성</button>
-        <button id="copyBtn" class="btn btn-secondary" disabled>복사</button>
-        <button id="customBtn" class="btn btn-secondary">직접 입력</button>
-      </div>
-
-      <!-- 커스텀 메일 입력 -->
-      <div class="custom-email" id="customSection" style="display:none;">
-        <div class="custom-input-group">
-          <input type="text" id="customLogin" placeholder="아이디" />
-          <span>@</span>
-          <select id="domainSelect"></select>
-        </div>
-        <button id="customApplyBtn" class="btn btn-primary">사용하기</button>
-      </div>
-    </section>
-
-    <!-- 이전 메일 히스토리 -->
-    <section class="history-section" id="historySection" style="display:none;">
-      <h2>이전 메일 주소</h2>
-      <div class="history-list" id="historyList"></div>
-    </section>
-
-    <!-- 자동 새로고침 -->
-    <section class="refresh-section">
-      <label class="auto-refresh">
-        <input type="checkbox" id="autoRefresh" checked />
-        <span>자동 새로고침 (5초)</span>
-      </label>
-      <button id="refreshBtn" class="btn btn-outline" disabled>수동 새로고침</button>
-      <span class="timer" id="timer"></span>
-    </section>
-
-    <!-- 받은 메일함 -->
-    <section class="inbox-section">
-      <h2>받은 메일함 <span class="badge" id="mailCount">0</span></h2>
-      <div class="inbox" id="inbox">
-        <div class="empty-state" id="emptyState">
-          <div class="empty-icon">📭</div>
-          <p>아직 받은 메일이 없습니다</p>
-          <p class="hint">이 주소로 메일을 보내면 여기에 표시됩니다</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 메일 본문 뷰어 -->
-    <section class="viewer-section" id="viewerSection" style="display:none;">
-      <div class="viewer-header">
-        <button id="backBtn" class="btn btn-outline">← 목록으로</button>
-        <h2 id="viewerSubject">제목</h2>
-      </div>
-      <div class="viewer-meta">
-        <div><strong>보낸 사람:</strong> <span id="viewerFrom"></span></div>
-        <div><strong>받은 시간:</strong> <span id="viewerDate"></span></div>
-      </div>
-      <div class="viewer-body" id="viewerBody"></div>
-      <div class="viewer-attachments" id="viewerAttachments" style="display:none;">
-        <h3>첨부파일</h3>
-        <ul id="attachmentList"></ul>
-      </div>
-    </section>
-
-    <!-- 알림 토스트 -->
-    <div class="toast" id="toast"></div>
+      <button id="closeModalBtn" class="btn btn-outline">닫기</button>
+    </div>
   </div>
+
+  <main class="layout">
+    <!-- 좌측 사이드바: 메일 생성 + 목록 -->
+    <aside class="sidebar">
+      <section class="email-section">
+        <div class="email-display" id="emailDisplay">
+          <span class="placeholder">메일 주소를 생성하세요</span>
+        </div>
+        <div class="retention-info" id="retentionInfo"></div>
+        <div class="email-actions">
+          <button id="generateBtn" class="btn btn-primary">새 메일 생성</button>
+          <button id="copyBtn" class="btn btn-secondary" disabled>복사</button>
+          <button id="customBtn" class="btn btn-secondary">직접 입력</button>
+        </div>
+        <div class="custom-email" id="customSection" style="display:none;">
+          <div class="custom-input-group">
+            <input type="text" id="customLogin" placeholder="아이디" />
+            <span>@</span>
+            <select id="domainSelect"></select>
+          </div>
+          <button id="customApplyBtn" class="btn btn-primary">사용하기</button>
+        </div>
+      </section>
+
+      <section class="history-section" id="historySection" style="display:none;">
+        <h2>이전 메일 주소</h2>
+        <div class="history-list" id="historyList"></div>
+      </section>
+    </aside>
+
+    <!-- 우측 메인: 받은 메일함 + 뷰어 -->
+    <section class="main-panel">
+      <div class="refresh-section">
+        <h2 class="panel-title">받은 메일함 <span class="badge" id="mailCount">0</span></h2>
+        <label class="auto-refresh">
+          <input type="checkbox" id="autoRefresh" checked />
+          <span>자동 새로고침 (5초)</span>
+        </label>
+        <button id="refreshBtn" class="btn btn-outline btn-sm" disabled>새로고침</button>
+        <span class="timer" id="timer"></span>
+      </div>
+
+      <div class="inbox-wrapper">
+        <div class="inbox" id="inbox">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon">📭</div>
+            <p>아직 받은 메일이 없습니다</p>
+            <p class="hint">좌측에서 메일을 생성하거나 선택하세요</p>
+          </div>
+        </div>
+
+        <div class="viewer-section" id="viewerSection" style="display:none;">
+          <div class="viewer-header">
+            <button id="backBtn" class="btn btn-outline btn-sm">← 목록</button>
+            <h2 id="viewerSubject">제목</h2>
+          </div>
+          <div class="viewer-meta">
+            <div><strong>보낸 사람:</strong> <span id="viewerFrom"></span></div>
+            <div><strong>받은 시간:</strong> <span id="viewerDate"></span></div>
+          </div>
+          <div class="viewer-body" id="viewerBody"></div>
+          <div class="viewer-attachments" id="viewerAttachments" style="display:none;">
+            <h3>첨부파일</h3>
+            <ul id="attachmentList"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 알림 토스트 -->
+  <div class="toast" id="toast"></div>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
