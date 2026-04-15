@@ -234,7 +234,7 @@ async function syncFromFirebase() {
 
 // 초기화
 async function init() {
-  await loadDomains();
+  // UI 이벤트는 가장 먼저 바인딩 (네트워크 오류와 무관하게 동작하도록)
   generateBtn.addEventListener('click', generateEmail);
   copyBtn.addEventListener('click', copyEmail);
   customBtn.addEventListener('click', toggleCustom);
@@ -244,20 +244,25 @@ async function init() {
   backBtn.addEventListener('click', closeViewer);
   bindAuthEvents();
   handleAuthStateChange();
+  renderHistory();
+
+  // 네트워크 의존 작업들
+  try { await loadDomains(); } catch (e) { console.error(e); }
 
   // 저장된 세션 복원
   const saved = loadSession();
   if (saved) {
     showToast('이전 메일 세션을 복원하는 중...');
-    const ok = await restoreSession(saved);
-    if (ok) {
-      showToast(`${saved.address} 세션이 복원되었습니다`);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-      showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.');
-    }
+    try {
+      const ok = await restoreSession(saved);
+      if (ok) {
+        showToast(`${saved.address} 세션이 복원되었습니다`);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+        showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.');
+      }
+    } catch (e) { console.error(e); }
   }
-  renderHistory();
 }
 
 // 도메인 목록 로드 (모든 API에서 수집)
