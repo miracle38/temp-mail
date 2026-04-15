@@ -140,9 +140,9 @@ async function generateEmail() {
   generateBtn.disabled = true;
   generateBtn.innerHTML = '<span class="loading"></span>생성 중...';
   try {
-    const domain = domains[Math.floor(Math.random() * domains.length)];
+    const entry = domains[Math.floor(Math.random() * domains.length)];
     const login = randomString(10);
-    const address = `${login}@${domain}`;
+    const address = `${login}@${entry.domain}`;
     const account = await createAccount(address);
     setEmail(account);
     showToast('새 임시 메일이 생성되었습니다');
