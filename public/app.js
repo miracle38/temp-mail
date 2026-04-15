@@ -93,6 +93,13 @@ function getApiBase(domain) {
   return entry ? entry.apiBase : API_PROVIDERS[0].base;
 }
 
+// 안전한 JSON 파싱
+async function safeJson(res) {
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 // 계정 생성 및 토큰 발급
 async function createAccount(address) {
   const domain = address.split('@')[1];
@@ -106,8 +113,8 @@ async function createAccount(address) {
     body: JSON.stringify({ address, password }),
   });
   if (!createRes.ok) {
-    const err = await createRes.json();
-    throw new Error(err['hydra:description'] || err.detail || '계정 생성 실패');
+    const err = await safeJson(createRes);
+    throw new Error(err?.['hydra:description'] || err?.detail || '계정 생성 실패');
   }
 
   // 토큰 발급
@@ -116,10 +123,10 @@ async function createAccount(address) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
   });
-  if (!tokenRes.ok) {
+  const tokenData = await safeJson(tokenRes);
+  if (!tokenRes.ok || !tokenData?.token) {
     throw new Error('토큰 발급 실패');
   }
-  const tokenData = await tokenRes.json();
 
   return { address, password, token: tokenData.token, apiBase };
 }
@@ -219,7 +226,8 @@ async function fetchInbox() {
     const res = await fetch(`${currentEmail.apiBase}/messages`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
-    const data = await res.json();
+    const data = await safeJson(res);
+    if (!data) return;
     const messages = data['hydra:member'] || [];
     if (!Array.isArray(messages)) return;
 
@@ -276,7 +284,8 @@ async function readMessage(id) {
     const res = await fetch(`${currentEmail.apiBase}/messages/${id}`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
-    const msg = await res.json();
+    const msg = await safeJson(res);
+    if (!msg) { showToast('메일을 불러오지 못했습니다'); return; }
 
     viewerSubject.textContent = msg.subject || '(제목 없음)';
     viewerFrom.textContent = msg.from?.address || msg.from?.name || '';
