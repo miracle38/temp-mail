@@ -593,12 +593,29 @@ body {
   gap: 10px;
   margin-bottom: 10px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.viewer-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mail-position {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  padding: 0 6px;
+  white-space: nowrap;
+  min-width: 50px;
+  text-align: center;
 }
 
 .viewer-header h2 {
   font-size: 1.05rem;
   font-weight: 600;
   flex: 1;
+  min-width: 200px;
   word-break: break-word;
   color: #1e293b;
 }

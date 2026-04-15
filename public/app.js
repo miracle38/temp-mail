@@ -10,6 +10,8 @@ let refreshTimer = null;
 let countdown = 5;
 let domains = [];          // { domain, apiBase }[]
 let knownIds = new Set();
+let currentMailList = [];  // 현재 표시된 메일 목록 (정렬 순서)
+let currentMailIndex = -1; // 현재 보고 있는 메일의 인덱스
 
 // DOM 요소
 const emailDisplay = document.getElementById('emailDisplay');
@@ -34,6 +36,9 @@ const viewerBody = document.getElementById('viewerBody');
 const viewerAttachments = document.getElementById('viewerAttachments');
 const attachmentList = document.getElementById('attachmentList');
 const backBtn = document.getElementById('backBtn');
+const prevMailBtn = document.getElementById('prevMailBtn');
+const nextMailBtn = document.getElementById('nextMailBtn');
+const mailPosition = document.getElementById('mailPosition');
 const toast = document.getElementById('toast');
 
 // localStorage 키
@@ -309,6 +314,17 @@ async function init() {
   autoRefreshCheck.addEventListener('change', toggleAutoRefresh);
   refreshBtn.addEventListener('click', () => fetchInbox({ manual: true }));
   backBtn.addEventListener('click', closeViewer);
+  prevMailBtn.addEventListener('click', goToPrevMail);
+  nextMailBtn.addEventListener('click', goToNextMail);
+  // 키보드 단축키: ← 이전, → 다음, Esc 목록으로
+  document.addEventListener('keydown', (e) => {
+    if (viewerSection.style.display === 'none' || viewerSection.style.display === '') return;
+    // 입력 필드에 포커스가 있으면 무시
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrevMail(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); goToNextMail(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeViewer(); }
+  });
   bindAuthEvents();
   handleAuthStateChange();
   renderHistory();
@@ -706,6 +722,8 @@ function renderInbox(messages) {
   inbox.querySelectorAll('.mail-item').forEach(el => el.remove());
 
   messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // 정렬된 목록을 전역 변수에 저장 (이전/다음 네비게이션용)
+  currentMailList = messages.slice();
 
   messages.forEach(msg => {
     const item = document.createElement('div');
@@ -750,8 +768,44 @@ async function markAsRead(id, itemEl) {
   });
 }
 
+// 이전/다음 네비게이션 버튼 상태 갱신
+function updateMailNavigation() {
+  if (!currentMailList.length || currentMailIndex < 0) {
+    prevMailBtn.disabled = true;
+    nextMailBtn.disabled = true;
+    mailPosition.textContent = '';
+    return;
+  }
+  prevMailBtn.disabled = currentMailIndex <= 0;
+  nextMailBtn.disabled = currentMailIndex >= currentMailList.length - 1;
+  mailPosition.textContent = `${currentMailIndex + 1} / ${currentMailList.length}`;
+}
+
+// 이전 메일 (목록에서 위)
+function goToPrevMail() {
+  if (currentMailIndex <= 0) return;
+  const target = currentMailList[currentMailIndex - 1];
+  if (!target) return;
+  // DOM에서 해당 mail-item 찾기 (읽음 상태 갱신용)
+  const items = inbox.querySelectorAll('.mail-item');
+  const itemEl = items[currentMailIndex - 1];
+  readMessage(target.id, itemEl);
+}
+
+// 다음 메일 (목록에서 아래)
+function goToNextMail() {
+  if (currentMailIndex >= currentMailList.length - 1) return;
+  const target = currentMailList[currentMailIndex + 1];
+  if (!target) return;
+  const items = inbox.querySelectorAll('.mail-item');
+  const itemEl = items[currentMailIndex + 1];
+  readMessage(target.id, itemEl);
+}
+
 // 메일 읽기
 async function readMessage(id, itemEl) {
+  // 현재 메일 인덱스 추적
+  currentMailIndex = currentMailList.findIndex(m => m.id === id);
   try {
     let msg = null;
     let fromCache = false;
@@ -835,6 +889,7 @@ async function readMessage(id, itemEl) {
     // 사이드바 레이아웃: 뷰어 표시 시 목록 숨김
     inbox.style.display = 'none';
     viewerSection.style.display = 'flex';
+    updateMailNavigation();
   } catch {
     showToast('메일을 불러오지 못했습니다');
   }
@@ -844,6 +899,7 @@ async function readMessage(id, itemEl) {
 function closeViewer() {
   viewerSection.style.display = 'none';
   inbox.style.display = 'block';
+  currentMailIndex = -1;
 }
 
 // 자동 새로고침
