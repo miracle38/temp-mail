@@ -157,6 +157,7 @@ async function restoreSession(saved) {
     fetchInbox();
     startAutoRefresh();
     updateRetentionDisplay();
+    renderHistory();  // 활성 표시 갱신
     return true;
   } catch { return false; }
 }
