@@ -72,7 +72,7 @@ body {
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 480px 1fr;
   gap: 20px;
   padding: 20px;
   max-width: 1600px;
@@ -170,18 +170,26 @@ body {
 .email-display {
   background: #0f172a;
   border-radius: 10px;
-  padding: 16px;
+  padding: 14px 16px;
   text-align: center;
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #38bdf8;
   margin-bottom: 12px;
   border: 1px solid #334155;
-  word-break: break-all;
   min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.email-display > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
 }
 
 .email-display .placeholder {
@@ -208,10 +216,15 @@ body {
 .email-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-.email-actions .btn { flex: 1; min-width: 90px; }
+.email-actions .btn {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  padding: 10px 12px;
+}
 
 .custom-email {
   margin-top: 14px;
@@ -315,9 +328,11 @@ body {
 
 .history-addr {
   flex: 1;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: #38bdf8;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 
@@ -649,7 +664,7 @@ body {
 }
 
 /* 반응형 */
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }
