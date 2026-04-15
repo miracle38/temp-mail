@@ -640,7 +640,7 @@ async function generateEmail() {
     return;
   }
   if (getHistory().length >= MAX_HISTORY) {
-    showToast(`이전 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
+    showToast(`임시 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
     return;
   }
   generateBtn.disabled = true;
@@ -752,7 +752,7 @@ async function applyCustom() {
   const targetAddress = `${login}@${domain}`;
   const exists = existingHistory.find(h => h.address === targetAddress);
   if (!exists && existingHistory.length >= MAX_HISTORY) {
-    showToast(`이전 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
+    showToast(`임시 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
     return;
   }
   customApplyBtn.disabled = true;
@@ -892,6 +892,8 @@ async function fetchInbox({ manual = false } = {}) {
 
   combined.forEach(m => knownIds.add(m.id));
   renderInbox(combined);
+  // 사이드바 메일 수 배지 갱신
+  renderHistory();
 }
 
 // 메일 목록 렌더링
@@ -937,7 +939,7 @@ function renderInbox(messages) {
   });
 }
 
-// 메일 읽음 처리 (서버 + UI)
+// 메일 읽음 처리 (서버 + UI + 캐시)
 async function markAsRead(id, itemEl) {
   if (itemEl && itemEl.classList.contains('unread')) {
     itemEl.classList.remove('unread');
@@ -951,6 +953,16 @@ async function markAsRead(id, itemEl) {
       mailCount.textContent = totalEls.length;
     }
   }
+  // 캐시도 읽음으로 표시
+  if (currentEmail) {
+    const cache = getMessageCache(currentEmail.address);
+    if (cache[id]) {
+      cache[id].seen = true;
+      setMessageCache(currentEmail.address, cache);
+    }
+  }
+  // 사이드바 안읽음 카운트 갱신
+  renderHistory();
   await apiFetch(`${currentEmail.apiBase}/messages/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json' },
@@ -1146,9 +1158,20 @@ function renderHistory() {
     const switchLabel = isActive ? '사용 중' : (expired ? '만료' : '전환');
     const switchDisabled = (isActive || expired) ? 'disabled' : '';
     const expiredBadge = expired ? '<span class="expired-badge" title="유효기간 만료">[만료]</span>' : '';
+    // 캐시된 메일 수
+    const cachedMessages = Object.values(getMessageCache(h.address));
+    const totalCount = cachedMessages.length;
+    const unreadCount = cachedMessages.filter(m => !m.seen).length;
+    let mailBadge = '';
+    if (totalCount > 0) {
+      mailBadge = unreadCount > 0
+        ? `<span class="mail-count-badge has-unread" title="${unreadCount}건 안읽음 / 총 ${totalCount}건">${unreadCount}/${totalCount}</span>`
+        : `<span class="mail-count-badge" title="총 ${totalCount}건 (모두 읽음)">${totalCount}</span>`;
+    }
     item.innerHTML = `
       <span class="history-num">${index + 1}</span>
       <span class="history-addr">${escapeHtml(h.address)} ${expiredBadge}</span>
+      ${mailBadge}
       <span class="history-date">${formatDate(h.createdAt)}</span>
       <button class="btn btn-outline btn-sm history-switch" ${switchDisabled}>${switchLabel}</button>
       <button class="btn btn-danger btn-sm history-delete" title="삭제">✕</button>

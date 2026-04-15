@@ -424,6 +424,23 @@ body {
   white-space: nowrap;
 }
 
+.mail-count-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.mail-count-badge.has-unread {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+}
+
 /* 새로고침/헤더 바 */
 .refresh-section {
   display: flex;
