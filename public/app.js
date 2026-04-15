@@ -277,6 +277,16 @@ async function refreshAllAddresses() {
       if (newCount > 0) totalNew += newCount;
       setMessageCache(h.address, cache);
       updatedAddresses++;
+
+      // 백그라운드 본문 프리페치 (현재 활성 주소만, 토큰이 currentEmail 기준이라)
+      if (currentEmail && currentEmail.address === h.address) {
+        const needsPrefetch = allMessages.filter(m => !cache[m.id]?._cachedFull);
+        if (needsPrefetch.length > 0) {
+          prefetchBodies(h.address, needsPrefetch).catch(err => {
+            console.error('본문 프리페치 실패', err);
+          });
+        }
+      }
     } catch (err) {
       console.error('주소 새로고침 실패:', h.address, err);
     }
@@ -1175,6 +1185,62 @@ async function fetchInbox({ manual = false } = {}) {
   renderInbox(combined);
   // 사이드바 메일 수 배지 갱신
   renderHistory();
+
+  // 📥 백그라운드 본문 프리페치: 본문 캐시 없는 메일을 미리 받아두어
+  // mail.tm/gw가 나중에 서버에서 지워도 캐시본으로 항상 표시 가능하게 함
+  const needsPrefetch = allMessages.filter(m => !cache[m.id]?._cachedFull);
+  if (needsPrefetch.length > 0) {
+    prefetchBodies(currentEmail.address, needsPrefetch).catch(err => {
+      console.error('본문 프리페치 실패', err);
+    });
+  }
+}
+
+// 본문 프리페치: rate limit 존중하면서 한 건씩 가져와 캐시 저장
+// 404면 _cachedOnly=true로 승격 (이미 지워진 메일 마킹)
+let _prefetchRunning = false;
+async function prefetchBodies(address, messages) {
+  // 동시 실행 방지 (다음 fetchInbox 호출 시 쌓이지 않도록)
+  if (_prefetchRunning) return;
+  _prefetchRunning = true;
+  try {
+    for (const m of messages) {
+      // 세션 바뀌면 즉시 중단
+      if (!currentEmail || currentEmail.address !== address) break;
+      // 이미 다른 경로로 캐시됐으면 스킵
+      const cacheNow = getMessageCache(address);
+      if (cacheNow[m.id]?._cachedFull) continue;
+
+      const result = await apiFetch(`${currentEmail.apiBase}/messages/${m.id}`);
+      if (!result) break;
+
+      const cache = getMessageCache(address);
+      if (result.data && !result.error) {
+        // 본문 캐시 저장 (서버에서 살아있음이 확인됨)
+        cache[m.id] = { ...cache[m.id], ...result.data, _cachedFull: true, _cachedOnly: false };
+        setMessageCache(address, cache);
+      } else if (result.status === 404) {
+        // 이미 서버에서 삭제됨 → 메타데이터만 있고 본문 없음 상태로 _cachedOnly 승격
+        if (cache[m.id]) {
+          cache[m.id]._cachedOnly = true;
+          setMessageCache(address, cache);
+        }
+      } else if (result.error === 'unauthorized') {
+        // 토큰 만료: 중단 (자동 새로고침이 재시도함)
+        break;
+      }
+      // rate limit 회피 (mail.tm/gw 8 QPS → 여유있게 200ms)
+      await new Promise(r => setTimeout(r, 200));
+    }
+    // UI 갱신 (현재 주소면 인박스도 다시 그리기)
+    if (currentEmail && currentEmail.address === address) {
+      const combined = Object.values(getMessageCache(address));
+      renderInbox(combined);
+    }
+    renderHistory();
+  } finally {
+    _prefetchRunning = false;
+  }
 }
 
 // 메일 목록 렌더링
