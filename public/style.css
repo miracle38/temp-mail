@@ -206,6 +206,58 @@ header h1 {
   margin-left: auto;
 }
 
+/* 이전 메일 히스토리 */
+.history-section {
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  border: 1px solid #334155;
+}
+
+.history-section h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #94a3b8;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-bottom: 1px solid #293548;
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item.active {
+  background: #293548;
+}
+
+.history-addr {
+  flex: 1;
+  font-size: 0.9rem;
+  color: #38bdf8;
+  word-break: break-all;
+}
+
+.history-date {
+  font-size: 0.75rem;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 /* 받은 메일함 */
 .inbox-section {
   background: #1e293b;

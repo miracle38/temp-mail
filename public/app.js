@@ -36,6 +36,62 @@ const attachmentList = document.getElementById('attachmentList');
 const backBtn = document.getElementById('backBtn');
 const toast = document.getElementById('toast');
 
+// localStorage 키
+const STORAGE_KEY = 'tempmail_current';
+const HISTORY_KEY = 'tempmail_history';
+
+// 세션 저장
+function saveSession() {
+  if (!currentEmail) return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
+  // 히스토리에 추가 (중복 방지, 최대 10개)
+  const history = getHistory();
+  if (!history.find(h => h.address === currentEmail.address)) {
+    history.unshift({ address: currentEmail.address, password: currentEmail.password, apiBase: currentEmail.apiBase, createdAt: new Date().toISOString() });
+    if (history.length > 10) history.pop();
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  }
+  renderHistory();
+}
+
+// 세션 복원
+function loadSession() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) return null;
+    return JSON.parse(data);
+  } catch { return null; }
+}
+
+// 히스토리 조회
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+// 저장된 세션으로 토큰 재발급 후 복원
+async function restoreSession(saved) {
+  try {
+    const tokenRes = await fetch(`${saved.apiBase}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: saved.address, password: saved.password }),
+    });
+    const tokenData = await safeJson(tokenRes);
+    if (!tokenRes.ok || !tokenData?.token) return false;
+    const account = { address: saved.address, password: saved.password, token: tokenData.token, apiBase: saved.apiBase };
+    currentEmail = account;
+    emailDisplay.innerHTML = `<span>${escapeHtml(account.address)}</span>`;
+    copyBtn.disabled = false;
+    refreshBtn.disabled = false;
+    knownIds.clear();
+    fetchInbox();
+    startAutoRefresh();
+    return true;
+  } catch { return false; }
+}
+
 // 초기화
 async function init() {
   await loadDomains();
@@ -46,6 +102,20 @@ async function init() {
   autoRefreshCheck.addEventListener('change', toggleAutoRefresh);
   refreshBtn.addEventListener('click', fetchInbox);
   backBtn.addEventListener('click', closeViewer);
+
+  // 저장된 세션 복원
+  const saved = loadSession();
+  if (saved) {
+    showToast('이전 메일 세션을 복원하는 중...');
+    const ok = await restoreSession(saved);
+    if (ok) {
+      showToast(`${saved.address} 세션이 복원되었습니다`);
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+      showToast('이전 세션이 만료되었습니다. 새 메일을 생성해주세요.');
+    }
+  }
+  renderHistory();
 }
 
 // 도메인 목록 로드 (모든 API에서 수집)
@@ -164,6 +234,7 @@ function setEmail(account) {
   clearInbox();
   fetchInbox();
   startAutoRefresh();
+  saveSession();
 }
 
 // 클립보드 복사
@@ -355,6 +426,44 @@ function toggleAutoRefresh() {
   } else {
     stopAutoRefresh();
   }
+}
+
+// 히스토리 렌더링
+function renderHistory() {
+  const section = document.getElementById('historySection');
+  const list = document.getElementById('historyList');
+  const history = getHistory();
+  if (history.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = '';
+  history.forEach(h => {
+    const isActive = currentEmail && currentEmail.address === h.address;
+    const item = document.createElement('div');
+    item.className = 'history-item' + (isActive ? ' active' : '');
+    item.innerHTML = `
+      <span class="history-addr">${escapeHtml(h.address)}</span>
+      <span class="history-date">${formatDate(h.createdAt)}</span>
+      <button class="btn btn-outline btn-sm" ${isActive ? 'disabled' : ''}>${isActive ? '사용 중' : '전환'}</button>
+    `;
+    if (!isActive) {
+      item.querySelector('button').onclick = async (e) => {
+        e.stopPropagation();
+        showToast('세션 전환 중...');
+        const ok = await restoreSession(h);
+        if (ok) {
+          saveSession();
+          showToast(`${h.address}로 전환되었습니다`);
+        } else {
+          showToast('세션이 만료되었습니다. 새 메일을 생성해주세요.');
+          // 만료된 항목 제거
+          const updated = getHistory().filter(x => x.address !== h.address);
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+          renderHistory();
+        }
+      };
+    }
+    list.appendChild(item);
+  });
 }
 
 // 받은 메일함 초기화
