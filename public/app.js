@@ -732,7 +732,17 @@ async function readMessage(id, itemEl) {
       attachmentList.innerHTML = '';
       msg.attachments.forEach(att => {
         const li = document.createElement('li');
-        li.innerHTML = `<a href="${att.downloadUrl}" target="_blank" rel="noopener">${escapeHtml(att.filename)} (${formatSize(att.size)})</a>`;
+        const fileIcon = getFileIcon(att.filename, att.contentType);
+        li.innerHTML = `
+          <button class="attachment-btn" data-id="${att.id}" data-filename="${escapeHtml(att.filename)}" data-url="${att.downloadUrl}">
+            <span class="attachment-icon">${fileIcon}</span>
+            <span class="attachment-name">${escapeHtml(att.filename)}</span>
+            <span class="attachment-size">${formatSize(att.size)}</span>
+            <span class="attachment-download">⬇</span>
+          </button>
+        `;
+        const btn = li.querySelector('.attachment-btn');
+        btn.addEventListener('click', () => downloadAttachment(msg.id, att));
         attachmentList.appendChild(li);
       });
     } else {
@@ -874,6 +884,60 @@ function formatDate(dateStr) {
   const hh = String(d.getHours()).padStart(2, '0');
   const mi = String(d.getMinutes()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+// 파일 확장자/타입에 따른 아이콘
+function getFileIcon(filename, contentType) {
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  const ct = (contentType || '').toLowerCase();
+  if (ct.startsWith('image/') || /^(png|jpe?g|gif|bmp|webp|svg)$/.test(ext)) return '🖼️';
+  if (ct.startsWith('video/') || /^(mp4|mov|avi|mkv|webm)$/.test(ext)) return '🎬';
+  if (ct.startsWith('audio/') || /^(mp3|wav|flac|ogg|m4a)$/.test(ext)) return '🎵';
+  if (ct === 'application/pdf' || ext === 'pdf') return '📕';
+  if (/^(zip|rar|7z|tar|gz)$/.test(ext)) return '🗜️';
+  if (/^(doc|docx)$/.test(ext)) return '📘';
+  if (/^(xls|xlsx|csv)$/.test(ext)) return '📗';
+  if (/^(ppt|pptx)$/.test(ext)) return '📙';
+  if (/^(txt|md|log)$/.test(ext)) return '📄';
+  if (/^(js|ts|py|java|c|cpp|cs|go|rs|rb|html|css|json|xml)$/.test(ext)) return '📃';
+  return '📎';
+}
+
+// 첨부파일 다운로드 (인증 토큰 필요하므로 blob으로 받아서 저장)
+async function downloadAttachment(msgId, att) {
+  if (!currentEmail) return;
+  showToast(`${att.filename} 다운로드 중...`, 'info');
+  // downloadUrl이 상대경로면 apiBase 붙임
+  let url = att.downloadUrl || `/messages/${msgId}/attachment/${att.id}`;
+  if (!/^https?:\/\//.test(url)) {
+    url = currentEmail.apiBase + (url.startsWith('/') ? url : '/' + url);
+  }
+  try {
+    let res = await fetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
+    // 401: 토큰 재발급 후 재시도
+    if (res.status === 401) {
+      const ok = await refreshToken();
+      if (ok) {
+        res = await fetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
+      }
+    }
+    if (!res.ok) {
+      showToast(`첨부파일을 다운로드할 수 없습니다 (오류 ${res.status})`, 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = att.filename || 'attachment';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    showToast(`${att.filename} 다운로드 완료`, 'success');
+  } catch (err) {
+    showToast('다운로드 실패: ' + (err.message || '네트워크 오류'), 'error');
+  }
 }
 
 // 유틸: 파일 크기 포맷

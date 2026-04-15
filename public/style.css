@@ -643,20 +643,67 @@ body {
 .viewer-attachments ul { list-style: none; }
 
 .viewer-attachments li {
-  padding: 8px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
   margin-bottom: 6px;
 }
 
-.viewer-attachments a {
-  color: #2563eb;
-  text-decoration: none;
+.attachment-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
   font-size: 0.88rem;
+  color: #334155;
+  text-align: left;
+  font-family: inherit;
 }
 
-.viewer-attachments a:hover { text-decoration: underline; }
+.attachment-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.1);
+}
+
+.attachment-btn:active {
+  transform: translateY(0);
+}
+
+.attachment-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.attachment-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.attachment-size {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.attachment-download {
+  color: #6366f1;
+  font-size: 1rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.attachment-btn:hover .attachment-download {
+  opacity: 1;
+}
 
 /* 모달 */
 .modal-overlay {
