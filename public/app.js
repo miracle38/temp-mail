@@ -487,10 +487,13 @@ function handleAuthStateChange() {
         await syncFromFirebase();
         updateStorageDisplay();
       }
+      // 실시간 동기화 리스너 활성화
+      subscribeToRemoteHistory();
     } else {
       initialFirebaseSyncDone = false;
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
+      unsubscribeRemoteHistory();
       updateStorageDisplay();
     }
   });
@@ -528,6 +531,56 @@ async function syncFromFirebase() {
   renderHistory();
   // 병합 결과를 Firebase에 다시 저장
   syncToFirebase();
+}
+
+// 원격 히스토리 실시간 리스너 (다른 브라우저에서 삭제/추가 즉시 반영)
+let _historyListenerRef = null;
+function subscribeToRemoteHistory() {
+  if (!currentUser || !db) return;
+  unsubscribeRemoteHistory();
+  const ref = db.ref(`tempmail/${currentUser.uid}/history`);
+  const handler = (snap) => {
+    const remoteHistory = snap.exists() ? (snap.val() || []) : [];
+    const localHistory = getHistory();
+    const remoteAddrs = new Set(remoteHistory.map(h => h.address));
+    const localAddrs = new Set(localHistory.map(h => h.address));
+    const sameSet = remoteAddrs.size === localAddrs.size && [...remoteAddrs].every(a => localAddrs.has(a));
+    if (sameSet) return; // 동일하면 무시 (자기 write 반영분 포함)
+
+    // 원격에서 사라진 주소는 로컬 메일 캐시도 제거
+    localHistory.forEach(h => {
+      if (!remoteAddrs.has(h.address)) {
+        try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+      }
+    });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(remoteHistory));
+
+    // 현재 사용 중인 주소가 원격에서 삭제됐다면 세션도 해제
+    if (currentEmail && !remoteAddrs.has(currentEmail.address)) {
+      currentEmail = null;
+      localStorage.removeItem(STORAGE_KEY);
+      emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
+      copyBtn.disabled = true;
+      refreshBtn.disabled = true;
+      clearInbox();
+      stopAutoRefresh();
+      updateRetentionDisplay();
+      showToast('다른 기기에서 현재 사용 중이던 메일이 삭제되었습니다', 'info');
+    } else if (remoteAddrs.size < localAddrs.size) {
+      showToast('다른 기기에서 변경된 내용을 반영했습니다', 'info');
+    }
+    renderHistory();
+    scheduleStorageUpdate();
+  };
+  ref.on('value', handler);
+  _historyListenerRef = { ref, handler };
+}
+
+function unsubscribeRemoteHistory() {
+  if (_historyListenerRef) {
+    try { _historyListenerRef.ref.off('value', _historyListenerRef.handler); } catch {}
+    _historyListenerRef = null;
+  }
 }
 
 // Firebase 인증 상태가 결정될 때까지 대기 (로컬/클라우드 복원 경쟁 조건 방지)
