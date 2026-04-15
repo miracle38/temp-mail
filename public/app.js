@@ -596,42 +596,53 @@ async function apiFetch(url, options = {}, { maxRetries = 2, silentOn429 = false
   return { error: 'unknown' };
 }
 
-// 받은 메일 가져오기
+// 받은 메일 가져오기 (모든 페이지 수집)
 async function fetchInbox({ manual = false } = {}) {
   if (!currentEmail) return;
-  const result = await apiFetch(`${currentEmail.apiBase}/messages`);
-  if (!result) return;
-  if (result.error) {
-    // 에러 처리
-    if (manual) {
-      // 수동 새로고침일 때만 사용자에게 알림
-      if (result.error === 'unauthorized') {
-        showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
-      } else if (result.error === 'network') {
-        showToast('네트워크 오류: 연결을 확인해주세요', 'error');
-      } else if (result.status === 429) {
-        showToast('요청이 너무 많습니다. 잠시 후 다시 시도해주세요', 'error');
-      } else {
-        showToast(`메일 목록을 불러오지 못했습니다 (오류 ${result.status || ''})`, 'error');
+  const allMessages = [];
+  const MAX_PAGES = 20; // 최대 600통까지 (30 * 20)
+  let firstResult = null;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const result = await apiFetch(`${currentEmail.apiBase}/messages?page=${page}`);
+    if (!result) return;
+    if (page === 1) firstResult = result;
+    if (result.error) {
+      if (page > 1) break; // 뒤 페이지 에러는 무시하고 가진 것만 사용
+      // 첫 페이지 에러만 사용자에게 알림
+      if (manual) {
+        if (result.error === 'unauthorized') {
+          showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
+        } else if (result.error === 'network') {
+          showToast('네트워크 오류: 연결을 확인해주세요', 'error');
+        } else if (result.status === 429) {
+          showToast('요청이 너무 많습니다. 잠시 후 다시 시도해주세요', 'error');
+        } else {
+          showToast(`메일 목록을 불러오지 못했습니다 (오류 ${result.status || ''})`, 'error');
+        }
       }
+      return;
     }
-    return;
+    const data = result.data;
+    if (!data) break;
+    const pageMessages = data['hydra:member'] || [];
+    if (!Array.isArray(pageMessages) || pageMessages.length === 0) break;
+    allMessages.push(...pageMessages);
+    // 다음 페이지가 없으면 종료
+    const view = data['hydra:view'];
+    if (!view || !view['hydra:next']) break;
   }
-  const data = result.data;
-  if (!data) return;
-  const messages = data['hydra:member'] || [];
-  if (!Array.isArray(messages)) return;
 
   // 새 메일 알림
   if (knownIds.size > 0) {
-    const newMails = messages.filter(m => !knownIds.has(m.id));
+    const newMails = allMessages.filter(m => !knownIds.has(m.id));
     if (newMails.length > 0) {
       showToast(`새 메일 ${newMails.length}통이 도착했습니다!`, 'info');
     }
   }
 
-  messages.forEach(m => knownIds.add(m.id));
-  renderInbox(messages);
+  allMessages.forEach(m => knownIds.add(m.id));
+  renderInbox(allMessages);
 }
 
 // 메일 목록 렌더링
