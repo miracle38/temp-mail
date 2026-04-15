@@ -138,6 +138,9 @@ function getHistory() {
 // 저장된 세션으로 토큰 재발급 후 복원
 async function restoreSession(saved) {
   try {
+    // 이전 세션의 자동 새로고침 즉시 중단 (이전 계정 데이터로 덮어쓰기 방지)
+    stopAutoRefresh();
+
     const tokenRes = await fetch(`${saved.apiBase}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -154,7 +157,9 @@ async function restoreSession(saved) {
     copyBtn.disabled = false;
     refreshBtn.disabled = false;
     knownIds.clear();
-    fetchInbox();
+    clearInbox();  // 이전 목록 비우고 로딩 상태로
+    // 첫 fetch는 반드시 완료 후 자동 새로고침 시작 (경쟁 조건 방지)
+    await fetchInbox();
     startAutoRefresh();
     updateRetentionDisplay();
     renderHistory();  // 활성 표시 갱신
@@ -184,6 +189,8 @@ function bindAuthEvents() {
 }
 
 // 인증 상태 변경 처리
+let initialFirebaseSyncDone = false;
+
 function handleAuthStateChange() {
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && ALLOWED_EMAILS.indexOf(user.email) === -1) {
@@ -197,9 +204,13 @@ function handleAuthStateChange() {
       userInfo.style.display = 'flex';
       userEmailSpan.textContent = user.email;
       syncStatus.innerHTML = '<span class="sync-on">☁️ 클라우드 동기화 중</span>';
-      // Firebase에서 데이터 로드 및 병합
-      await syncFromFirebase();
+      // 최초 인증 시에만 원격 세션으로 자동 복원 (그 후에는 사용자가 선택한 세션 유지)
+      if (!initialFirebaseSyncDone) {
+        initialFirebaseSyncDone = true;
+        await syncFromFirebase();
+      }
     } else {
+      initialFirebaseSyncDone = false;
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
       syncStatus.innerHTML = '<span class="sync-off">💾 로컬 저장소 사용 중 (로그인 시 동기화)</span>';
