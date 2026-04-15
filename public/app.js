@@ -316,13 +316,13 @@ async function init() {
   backBtn.addEventListener('click', closeViewer);
   prevMailBtn.addEventListener('click', goToPrevMail);
   nextMailBtn.addEventListener('click', goToNextMail);
-  // 키보드 단축키: ← 이전, → 다음, Esc 목록으로
+  // 키보드 단축키: ↑ 최근, ↓ 예전, Esc 목록으로
   document.addEventListener('keydown', (e) => {
     if (viewerSection.style.display === 'none' || viewerSection.style.display === '') return;
     // 입력 필드에 포커스가 있으면 무시
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrevMail(); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); goToNextMail(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); goToPrevMail(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); goToNextMail(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeViewer(); }
   });
   bindAuthEvents();
