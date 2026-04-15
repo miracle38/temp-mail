@@ -1286,16 +1286,22 @@ async function markAsRead(id, itemEl) {
       mailCount.textContent = totalEls.length;
     }
   }
-  // 캐시도 읽음으로 표시
+  // 캐시 상태 확인 + 갱신
+  let alreadySeen = false;
+  let isCachedOnly = false;
   if (currentEmail) {
     const cache = getMessageCache(currentEmail.address);
     if (cache[id]) {
+      alreadySeen = cache[id].seen === true;
+      isCachedOnly = cache[id]._cachedOnly === true;
       cache[id].seen = true;
       setMessageCache(currentEmail.address, cache);
     }
   }
   // 사이드바 안읽음 카운트 갱신
   renderHistory();
+  // 이미 읽은 메일이거나 서버에서 삭제된 캐시본이면 PATCH 스킵 (불필요한 404 방지)
+  if (alreadySeen || isCachedOnly) return;
   await apiFetch(`${currentEmail.apiBase}/messages/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json' },
@@ -1346,10 +1352,12 @@ async function readMessage(id, itemEl) {
     let fromCache = false;
     const cachePreview = getMessageCache(currentEmail.address);
     const cachedEntry = cachePreview[id];
-    // 이미 "캐시본(💾)"으로 확정된 메일은 서버 GET 스킵 (404 콘솔 노이즈 + 불필요한 네트워크 방지)
-    if (cachedEntry?._cachedOnly && cachedEntry?._cachedFull) {
+    // 본문 캐시가 이미 있으면 서버 GET 스킵 (메일 본문은 불변)
+    // → 404 콘솔 노이즈 제거 + 즉시 표시 + 네트워크 절약
+    // 읽음 처리는 markAsRead()로 별도 PATCH 수행 (아래 분기)
+    if (cachedEntry?._cachedFull) {
       msg = cachedEntry;
-      fromCache = true;
+      fromCache = cachedEntry._cachedOnly === true;
     } else {
       const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
       if (result && !result.error && result.data) {
