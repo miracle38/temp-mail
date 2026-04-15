@@ -47,7 +47,12 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
 }
+.brand h1:hover { opacity: 0.75; }
+.brand h1:active { opacity: 0.55; }
 
 .sync-status {
   font-size: 0.75rem;

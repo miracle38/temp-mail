@@ -730,6 +730,17 @@ async function init() {
   autoRefreshCheck.addEventListener('change', toggleAutoRefresh);
   refreshBtn.addEventListener('click', () => fetchInbox({ manual: true }));
   backBtn.addEventListener('click', closeViewer);
+  // 좌측 상단 "임시메일" 타이틀 → 메인(목록) 화면으로
+  const brandTitle = document.getElementById('brandTitle');
+  if (brandTitle) {
+    brandTitle.addEventListener('click', () => {
+      // 뷰어 열려있으면 닫기 (히스토리 정리 포함)
+      const viewerOpen = viewerSection.style.display !== 'none' && viewerSection.style.display !== '';
+      if (viewerOpen) closeViewer();
+      // 최상단으로 스크롤
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
   prevMailBtn.addEventListener('click', goToPrevMail);
   nextMailBtn.addEventListener('click', goToNextMail);
   const deleteMailBtn = document.getElementById('deleteMailBtn');
