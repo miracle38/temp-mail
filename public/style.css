@@ -629,6 +629,78 @@ body {
   min-width: 120px;
 }
 
+/* 푸터 */
+.site-footer {
+  background: linear-gradient(180deg, #0b1220 0%, #060b18 100%);
+  border-top: 1px solid #1e293b;
+  padding: 16px 24px;
+  color: #64748b;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.footer-content {
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.footer-brand strong {
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+}
+
+.footer-divider {
+  color: #334155;
+}
+
+.footer-made {
+  color: #64748b;
+}
+
+.heart {
+  color: #ef4444;
+  display: inline-block;
+  animation: heartbeat 1.4s ease-in-out infinite;
+}
+
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.footer-link {
+  color: #94a3b8;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  border: 1px solid #1e293b;
+}
+
+.footer-link:hover {
+  color: #38bdf8;
+  border-color: #334155;
+  background: rgba(56, 189, 248, 0.05);
+}
+
 /* 토스트 알림 */
 .toast {
   position: fixed;
