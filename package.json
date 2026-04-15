@@ -1,0 +1,14 @@
+{
+  "name": "temp-mail",
+  "version": "1.0.0",
+  "description": "일회용 임시 메일 생성 및 수신 프로그램",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "localtunnel": "^2.0.2"
+  }
+}
