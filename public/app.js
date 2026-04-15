@@ -175,16 +175,36 @@ function bindAuthEvents() {
   emailLoginBtn.addEventListener('click', () => {
     const email = loginEmail.value.trim();
     const pw = loginPassword.value;
-    if (!email || !pw) { showToast('이메일과 비밀번호를 입력하세요'); return; }
+    if (!email) { showToast('이메일을 입력해주세요.', 'error'); loginEmail.focus(); return; }
+    if (!pw) { showToast('비밀번호를 입력해주세요.', 'error'); loginPassword.focus(); return; }
+    emailLoginBtn.disabled = true;
+    const originalText = emailLoginBtn.textContent;
+    emailLoginBtn.innerHTML = '<span class="loading"></span>로그인 중...';
     firebase.auth().signInWithEmailAndPassword(email, pw)
-      .then(() => { loginModal.style.display = 'none'; loginEmail.value = ''; loginPassword.value = ''; })
-      .catch(err => showToast('로그인 실패: ' + err.message));
+      .then(() => {
+        loginModal.style.display = 'none';
+        loginEmail.value = '';
+        loginPassword.value = '';
+        showToast('로그인되었습니다', 'success');
+      })
+      .catch(err => showToast(firebaseErrorMessage(err), 'error'))
+      .finally(() => {
+        emailLoginBtn.disabled = false;
+        emailLoginBtn.textContent = originalText;
+      });
   });
   googleLoginBtn.addEventListener('click', () => {
     const provider = new firebase.auth.GoogleAuthProvider();
     firebase.auth().signInWithPopup(provider)
-      .then(() => { loginModal.style.display = 'none'; })
-      .catch(err => showToast('Google 로그인 실패: ' + err.message));
+      .then(() => {
+        loginModal.style.display = 'none';
+        showToast('로그인되었습니다', 'success');
+      })
+      .catch(err => {
+        // 사용자가 팝업을 닫은 경우는 에러 표시하지 않음
+        if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') return;
+        showToast(firebaseErrorMessage(err), 'error');
+      });
   });
 }
 
@@ -194,7 +214,7 @@ let initialFirebaseSyncDone = false;
 function handleAuthStateChange() {
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && ALLOWED_EMAILS.indexOf(user.email) === -1) {
-      alert('허용되지 않은 계정입니다.');
+      showToast(`접근 권한이 없는 계정입니다 (${user.email})`, 'error');
       firebase.auth().signOut();
       return;
     }
@@ -390,7 +410,7 @@ async function createAccount(address) {
 // 랜덤 메일 생성
 async function generateEmail() {
   if (domains.length === 0) {
-    showToast('도메인 목록을 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+    showToast('도메인 목록을 불러오지 못했습니다. 네트워크를 확인 후 페이지를 새로고침 해주세요.', 'error');
     return;
   }
   generateBtn.disabled = true;
@@ -401,9 +421,9 @@ async function generateEmail() {
     const address = `${login}@${entry.domain}`;
     const account = await createAccount(address);
     setEmail(account);
-    showToast('새 임시 메일이 생성되었습니다');
+    showToast('새 임시 메일이 생성되었습니다', 'success');
   } catch (err) {
-    showToast('메일 생성에 실패했습니다: ' + err.message);
+    showToast(mailApiErrorMessage(err), 'error');
   } finally {
     generateBtn.disabled = false;
     generateBtn.textContent = '새 메일 생성';
@@ -479,12 +499,22 @@ async function applyCustom() {
   const login = customLogin.value.trim();
   const domain = domainSelect.value;
   if (!login) {
-    showToast('아이디를 입력해주세요');
+    showToast('아이디를 입력해주세요', 'error');
+    customLogin.focus();
+    return;
+  }
+  if (login.length < 3) {
+    showToast('아이디는 3자 이상 입력해주세요', 'error');
     customLogin.focus();
     return;
   }
   if (!/^[a-zA-Z0-9._-]+$/.test(login)) {
-    showToast('아이디는 영문, 숫자, ., _, - 만 사용 가능합니다');
+    showToast('아이디는 영문, 숫자, . _ - 만 사용 가능합니다', 'error');
+    customLogin.focus();
+    return;
+  }
+  if (!domain) {
+    showToast('도메인을 선택해주세요', 'error');
     return;
   }
   customApplyBtn.disabled = true;
@@ -494,9 +524,10 @@ async function applyCustom() {
     const account = await createAccount(address);
     setEmail(account);
     customSection.style.display = 'none';
-    showToast('커스텀 메일 주소가 설정되었습니다');
+    customLogin.value = '';
+    showToast('커스텀 메일 주소가 설정되었습니다', 'success');
   } catch (err) {
-    showToast('설정 실패: ' + err.message);
+    showToast(mailApiErrorMessage(err), 'error');
   } finally {
     customApplyBtn.disabled = false;
     customApplyBtn.textContent = '사용하기';
@@ -741,11 +772,49 @@ function formatSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-// 유틸: 토스트 알림
-function showToast(message) {
+// 유틸: 토스트 알림 (type: 'info' | 'success' | 'error')
+function showToast(message, type = 'info') {
   toast.textContent = message;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2500);
+  toast.className = 'toast show toast-' + type;
+  const duration = type === 'error' ? 4500 : 2500;
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, duration);
+}
+
+// Firebase 인증 에러 → 친절한 한국어 메시지
+function firebaseErrorMessage(err) {
+  const code = err?.code || '';
+  const map = {
+    'auth/invalid-email': '올바른 이메일 형식이 아닙니다.',
+    'auth/user-not-found': '등록되지 않은 계정입니다.',
+    'auth/wrong-password': '비밀번호가 일치하지 않습니다.',
+    'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.',
+    'auth/invalid-login-credentials': '이메일 또는 비밀번호가 올바르지 않습니다.',
+    'auth/missing-password': '비밀번호를 입력해주세요.',
+    'auth/too-many-requests': '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.',
+    'auth/user-disabled': '비활성화된 계정입니다. 관리자에게 문의하세요.',
+    'auth/network-request-failed': '네트워크 연결을 확인해주세요.',
+    'auth/popup-closed-by-user': '로그인 창이 닫혔습니다.',
+    'auth/popup-blocked': '팝업이 차단되었습니다. 브라우저 설정을 확인해주세요.',
+    'auth/cancelled-popup-request': '이전 로그인 요청이 취소되었습니다.',
+    'auth/unauthorized-domain': '이 도메인에서는 로그인이 허용되지 않습니다.',
+  };
+  return map[code] || (err?.message ? `로그인 실패: ${err.message}` : '로그인에 실패했습니다.');
+}
+
+// mail.tm/mail.gw 에러 → 친절한 한국어 메시지
+function mailApiErrorMessage(err) {
+  const msg = (err?.message || '').toLowerCase();
+  if (msg.includes('address') && msg.includes('already')) return '이미 사용 중인 이메일 주소입니다. 다른 아이디를 시도해주세요.';
+  if (msg.includes('invalid email')) return '유효하지 않은 이메일 형식입니다.';
+  if (msg.includes('domain') && msg.includes('not valid')) return '선택한 도메인을 사용할 수 없습니다. 다시 시도해주세요.';
+  if (msg.includes('password') && msg.includes('short')) return '비밀번호가 너무 짧습니다.';
+  if (msg.includes('rate') || msg.includes('too many')) return '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
+  if (msg.includes('network') || msg.includes('failed to fetch')) return '네트워크 연결을 확인해주세요.';
+  if (msg.includes('토큰')) return '인증 토큰 발급에 실패했습니다. 잠시 후 다시 시도해주세요.';
+  return err?.message ? `메일 생성 실패: ${err.message}` : '메일 생성에 실패했습니다.';
 }
 
 // 시작
