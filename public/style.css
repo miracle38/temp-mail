@@ -627,6 +627,13 @@ body {
 
 .viewer-body img { max-width: 100%; height: auto; }
 
+.mail-html-frame {
+  width: 100%;
+  min-height: 400px;
+  border: none;
+  background: #ffffff;
+}
+
 .viewer-attachments {
   margin-top: 14px;
   padding-top: 14px;

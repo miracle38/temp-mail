@@ -215,7 +215,9 @@ function handleAuthStateChange() {
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && ALLOWED_EMAILS.indexOf(user.email) === -1) {
       showToast(`접근 권한이 없는 계정입니다 (${user.email})`, 'error');
-      firebase.auth().signOut();
+      // 권한 없는 계정은 즉시 로그아웃하고 데이터 접근 차단
+      currentUser = null;
+      try { await firebase.auth().signOut(); } catch {}
       return;
     }
     currentUser = user;
@@ -331,12 +333,14 @@ async function loadDomains() {
   });
 }
 
-// 랜덤 문자열 생성
+// 랜덤 문자열 생성 (crypto 기반 - 암호학적으로 안전)
 function randomString(len) {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const arr = new Uint32Array(len);
+  crypto.getRandomValues(arr);
   let result = '';
   for (let i = 0; i < len; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+    result += chars[arr[i] % chars.length];
   }
   return result;
 }
@@ -717,9 +721,16 @@ async function readMessage(id, itemEl) {
     viewerFrom.textContent = msg.from?.address || msg.from?.name || '';
     viewerDate.textContent = formatDate(msg.createdAt);
 
-    // HTML 본문 우선, 없으면 텍스트
+    // HTML 본문은 샌드박스 iframe으로 격리 (XSS 방어)
+    viewerBody.innerHTML = '';
     if (msg.html && msg.html.length > 0) {
-      viewerBody.innerHTML = msg.html.join('');
+      const iframe = document.createElement('iframe');
+      // sandbox=""로 모든 권한 차단: script 실행, form 제출, popup, top 이동 모두 금지
+      // (이미지/CSS는 정상 렌더링됨)
+      iframe.setAttribute('sandbox', '');
+      iframe.srcdoc = msg.html.join('');
+      iframe.className = 'mail-html-frame';
+      viewerBody.appendChild(iframe);
     } else if (msg.text) {
       viewerBody.textContent = msg.text;
     } else {
