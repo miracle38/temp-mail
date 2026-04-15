@@ -633,17 +633,19 @@ function renderHistory() {
   if (history.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
   list.innerHTML = '';
-  history.forEach(h => {
+  history.forEach((h, index) => {
     const isActive = currentEmail && currentEmail.address === h.address;
     const item = document.createElement('div');
     item.className = 'history-item' + (isActive ? ' active' : '');
     item.innerHTML = `
+      <span class="history-num">${index + 1}</span>
       <span class="history-addr">${escapeHtml(h.address)}</span>
       <span class="history-date">${formatDate(h.createdAt)}</span>
-      <button class="btn btn-outline btn-sm" ${isActive ? 'disabled' : ''}>${isActive ? '사용 중' : '전환'}</button>
+      <button class="btn btn-outline btn-sm history-switch" ${isActive ? 'disabled' : ''}>${isActive ? '사용 중' : '전환'}</button>
+      <button class="btn btn-danger btn-sm history-delete" title="삭제">✕</button>
     `;
     if (!isActive) {
-      item.querySelector('button').onclick = async (e) => {
+      item.querySelector('.history-switch').onclick = async (e) => {
         e.stopPropagation();
         showToast('세션 전환 중...');
         const ok = await restoreSession(h);
@@ -656,9 +658,30 @@ function renderHistory() {
           const updated = getHistory().filter(x => x.address !== h.address);
           localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
           renderHistory();
+          syncToFirebase();
         }
       };
     }
+    item.querySelector('.history-delete').onclick = (e) => {
+      e.stopPropagation();
+      if (!confirm(`${h.address}를 목록에서 삭제할까요?`)) return;
+      // 현재 사용 중인 메일이면 현재 세션도 해제
+      if (isActive) {
+        currentEmail = null;
+        localStorage.removeItem(STORAGE_KEY);
+        emailDisplay.innerHTML = '<span class="placeholder">메일 주소를 생성하세요</span>';
+        copyBtn.disabled = true;
+        refreshBtn.disabled = true;
+        clearInbox();
+        stopAutoRefresh();
+        updateRetentionDisplay();
+      }
+      const updated = getHistory().filter(x => x.address !== h.address);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+      renderHistory();
+      syncToFirebase();
+      showToast('삭제되었습니다');
+    };
     list.appendChild(item);
   });
 }
