@@ -269,6 +269,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .custom-input-group input {
@@ -278,7 +279,7 @@ body {
   padding: 9px 12px;
   color: #1e293b;
   font-size: 0.9rem;
-  flex: 1;
+  flex: 1 1 120px;
   min-width: 0;
 }
 
@@ -302,7 +303,9 @@ body {
   padding: 9px 10px;
   color: #1e293b;
   font-size: 0.85rem;
-  max-width: 140px;
+  /* max-width 제거 - 도메인이 길어도 전체 표시 */
+  min-width: 160px;
+  flex: 0 1 auto;
 }
 
 .custom-input-group select:focus {
