@@ -124,6 +124,80 @@ function isExpired(retentionAt) {
   return new Date(retentionAt) <= new Date();
 }
 
+// 모든 임시 메일 주소의 새 메일 확인 (사이드바 카운트 갱신)
+async function refreshAllAddresses() {
+  const history = getHistory();
+  if (history.length === 0) {
+    showToast('확인할 메일 주소가 없습니다', 'info');
+    return;
+  }
+  let totalNew = 0;
+  let updatedAddresses = 0;
+  for (const h of history) {
+    if (isExpired(h.retentionAt)) continue;
+    try {
+      // 토큰 발급
+      const tokenRes = await fetch(`${h.apiBase}/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: h.address, password: h.password }),
+      });
+      if (!tokenRes.ok) continue;
+      const tokenData = await safeJson(tokenRes);
+      if (!tokenData?.token) continue;
+
+      // 모든 페이지 수집
+      const allMessages = [];
+      for (let page = 1; page <= 20; page++) {
+        const res = await fetch(`${h.apiBase}/messages?page=${page}`, {
+          headers: { Authorization: `Bearer ${tokenData.token}` },
+        });
+        if (!res.ok) break;
+        const data = await safeJson(res);
+        if (!data) break;
+        const msgs = data['hydra:member'] || [];
+        if (msgs.length === 0) break;
+        allMessages.push(...msgs);
+        if (!data['hydra:view']?.['hydra:next']) break;
+      }
+
+      // 캐시 갱신 + 새 메일 카운트
+      const cache = getMessageCache(h.address);
+      const beforeIds = new Set(Object.keys(cache));
+      allMessages.forEach(m => {
+        cache[m.id] = { ...cache[m.id], ...m, _cachedOnly: false };
+      });
+      const serverIds = new Set(allMessages.map(m => m.id));
+      Object.values(cache).forEach(m => {
+        if (!serverIds.has(m.id)) m._cachedOnly = true;
+      });
+      const newCount = allMessages.filter(m => !beforeIds.has(m.id)).length;
+      if (newCount > 0) totalNew += newCount;
+      setMessageCache(h.address, cache);
+      updatedAddresses++;
+    } catch (err) {
+      console.error('주소 새로고침 실패:', h.address, err);
+    }
+    // Rate limit 회피 (mail.tm 8 QPS)
+    await new Promise(r => setTimeout(r, 200));
+  }
+  // UI 갱신
+  renderHistory();
+  // 현재 보고 있는 주소면 받은 메일함도 갱신
+  if (currentEmail) {
+    const cache = getMessageCache(currentEmail.address);
+    const combined = Object.values(cache);
+    knownIds.clear();
+    combined.forEach(m => knownIds.add(m.id));
+    renderInbox(combined);
+  }
+  if (totalNew > 0) {
+    showToast(`${updatedAddresses}개 주소 확인 완료 · 새 메일 ${totalNew}건 도착!`, 'success');
+  } else {
+    showToast(`${updatedAddresses}개 주소 확인 완료 · 새 메일 없음`, 'info');
+  }
+}
+
 // 스토리지 사용량 계산
 function calculateLocalStorageUsage() {
   let total = 0;
@@ -501,6 +575,20 @@ async function init() {
   bindAuthEvents();
   handleAuthStateChange();
   renderHistory();
+  // 전체 새로고침 버튼
+  const refreshAllBtn = document.getElementById('refreshAllBtn');
+  if (refreshAllBtn) {
+    refreshAllBtn.addEventListener('click', async () => {
+      refreshAllBtn.disabled = true;
+      const original = refreshAllBtn.innerHTML;
+      refreshAllBtn.innerHTML = '<span class="loading"></span>확인 중...';
+      try { await refreshAllAddresses(); }
+      finally {
+        refreshAllBtn.disabled = false;
+        refreshAllBtn.innerHTML = original;
+      }
+    });
+  }
 
   // 도메인 + 인증 상태 동시 로딩
   try { await loadDomains(); } catch (e) { console.error(e); }
