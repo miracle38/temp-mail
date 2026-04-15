@@ -1344,25 +1344,41 @@ async function readMessage(id, itemEl) {
   try {
     let msg = null;
     let fromCache = false;
-    const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
-    if (result && !result.error && result.data) {
-      msg = result.data;
-      // 본문도 캐시에 저장
-      const cache = getMessageCache(currentEmail.address);
-      cache[id] = { ...cache[id], ...msg, _cachedFull: true };
-      setMessageCache(currentEmail.address, cache);
+    const cachePreview = getMessageCache(currentEmail.address);
+    const cachedEntry = cachePreview[id];
+    // 이미 "캐시본(💾)"으로 확정된 메일은 서버 GET 스킵 (404 콘솔 노이즈 + 불필요한 네트워크 방지)
+    if (cachedEntry?._cachedOnly && cachedEntry?._cachedFull) {
+      msg = cachedEntry;
+      fromCache = true;
     } else {
-      // 서버 실패 → 캐시에서 읽기 시도
-      const cache = getMessageCache(currentEmail.address);
-      if (cache[id] && cache[id]._cachedFull) {
-        msg = cache[id];
-        fromCache = true;
-        showToast('서버에서 메일이 삭제되어 캐시본을 표시합니다', 'info');
-      } else if (cache[id]) {
-        // 메타데이터만 있고 본문 없음
-        showToast('서버에서 메일이 삭제되었습니다 (본문 캐시 없음)', 'error');
-        return;
+      const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
+      if (result && !result.error && result.data) {
+        msg = result.data;
+        // 본문도 캐시에 저장
+        const cache = getMessageCache(currentEmail.address);
+        cache[id] = { ...cache[id], ...msg, _cachedFull: true, _cachedOnly: false };
+        setMessageCache(currentEmail.address, cache);
+      } else if (result?.status === 404) {
+        // 서버가 명시적으로 404 → 실제 삭제됨. 캐시본 있으면 표시하고 _cachedOnly 마킹
+        const cache = getMessageCache(currentEmail.address);
+        if (cache[id] && cache[id]._cachedFull) {
+          cache[id]._cachedOnly = true;
+          setMessageCache(currentEmail.address, cache);
+          msg = cache[id];
+          fromCache = true;
+          showToast('서버에서 메일이 삭제되어 캐시본을 표시합니다', 'info');
+        } else if (cache[id]) {
+          cache[id]._cachedOnly = true;
+          setMessageCache(currentEmail.address, cache);
+          showToast('서버에서 메일이 삭제되었습니다 (본문 캐시 없음)', 'error');
+          renderInbox(Object.values(cache));
+          return;
+        } else {
+          showToast('메일을 찾을 수 없습니다', 'error');
+          return;
+        }
       } else {
+        // 기타 오류 (네트워크/인증/5xx): 캐시 폴백 없이 사용자에게 알림
         if (result?.error === 'unauthorized') {
           showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
         } else if (result?.error === 'network') {
