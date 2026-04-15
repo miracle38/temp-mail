@@ -51,10 +51,25 @@ body {
 
 .sync-status {
   font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .sync-on { color: #059669; }
 .sync-off { color: #94a3b8; }
+
+.storage-usage {
+  color: #64748b;
+  font-weight: 500;
+  cursor: help;
+}
+
+.storage-warn {
+  color: #d97706;
+  font-weight: 600;
+}
 
 .auth-bar {
   display: flex;

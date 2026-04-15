@@ -80,12 +80,17 @@ function setMessageCache(address, cache) {
 // 메일 캐시 → Firebase 동기화 (디바운스)
 const _mailSyncTimers = {};
 function syncMailCacheToFirebase(address) {
-  if (!currentUser || !db || !address) return;
+  if (!currentUser || !db || !address) {
+    scheduleStorageUpdate();  // 로컬 저장량은 즉시 반영
+    return;
+  }
   clearTimeout(_mailSyncTimers[address]);
   _mailSyncTimers[address] = setTimeout(() => {
     const cache = getMessageCache(address);
     const key = addressToKey(address);
-    db.ref(`tempmail/${currentUser.uid}/messages/${key}`).set(cache).catch(err => {
+    db.ref(`tempmail/${currentUser.uid}/messages/${key}`).set(cache).then(() => {
+      scheduleStorageUpdate();
+    }).catch(err => {
       console.error('메일 캐시 클라우드 저장 실패', err);
     });
   }, 2000);
@@ -117,6 +122,60 @@ async function loadMailCacheFromFirebase(address) {
 function isExpired(retentionAt) {
   if (!retentionAt) return false;
   return new Date(retentionAt) <= new Date();
+}
+
+// 스토리지 사용량 계산
+function calculateLocalStorageUsage() {
+  let total = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key === STORAGE_KEY || key === HISTORY_KEY || key.startsWith(MSG_CACHE_PREFIX))) {
+        const val = localStorage.getItem(key) || '';
+        total += key.length + val.length;
+      }
+    }
+  } catch {}
+  return total;
+}
+
+async function calculateCloudStorageUsage() {
+  if (!currentUser || !db) return null;
+  try {
+    const snap = await db.ref(`tempmail/${currentUser.uid}`).get();
+    if (!snap.exists()) return 0;
+    return JSON.stringify(snap.val()).length;
+  } catch { return null; }
+}
+
+// 바이트 → 사람이 읽기 좋은 단위
+function formatBytes(bytes) {
+  if (bytes == null) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+// 동기화 상태 + 스토리지 사용량 UI 갱신 (디바운스)
+let _storageUpdateTimer = null;
+function scheduleStorageUpdate() {
+  clearTimeout(_storageUpdateTimer);
+  _storageUpdateTimer = setTimeout(updateStorageDisplay, 1500);
+}
+
+async function updateStorageDisplay() {
+  if (currentUser) {
+    const bytes = await calculateCloudStorageUsage();
+    const sizeText = bytes != null ? formatBytes(bytes) : '계산 중';
+    const limit = 1024 * 1024 * 1024; // 1 GB
+    const percent = bytes != null ? Math.min(100, (bytes / limit) * 100).toFixed(2) : null;
+    const isWarn = bytes != null && bytes / limit > 0.8;
+    syncStatus.innerHTML = `<span class="sync-on">☁️ 클라우드 동기화 중</span> <span class="storage-usage${isWarn ? ' storage-warn' : ''}" title="Firebase 무료 한도 1 GB">· ${sizeText} / 1 GB${percent != null ? ` (${percent}%)` : ''}</span>`;
+  } else {
+    const bytes = calculateLocalStorageUsage();
+    syncStatus.innerHTML = `<span class="sync-off">💾 로컬 저장소 사용 중 (로그인 시 동기화)</span> <span class="storage-usage" title="브라우저 localStorage 사용량">· ${formatBytes(bytes)}</span>`;
+  }
 }
 
 // Firebase 상태
@@ -169,17 +228,22 @@ function saveSession() {
   syncToFirebase();
 }
 
-// Firebase에 동기화
+// Firebase에 동기화 (current/history 만 - messages 경로는 별도)
 function syncToFirebase() {
-  if (!currentUser || !db) return;
+  if (!currentUser || !db) {
+    scheduleStorageUpdate();
+    return;
+  }
   clearTimeout(fbSyncTimer);
   fbSyncTimer = setTimeout(() => {
-    const data = {
-      current: currentEmail,
-      history: getHistory(),
-      updatedAt: Date.now(),
+    const updates = {
+      [`tempmail/${currentUser.uid}/current`]: currentEmail,
+      [`tempmail/${currentUser.uid}/history`]: getHistory(),
+      [`tempmail/${currentUser.uid}/updatedAt`]: Date.now(),
     };
-    db.ref(`tempmail/${currentUser.uid}`).set(data).catch(err => {
+    db.ref().update(updates).then(() => {
+      scheduleStorageUpdate();
+    }).catch(err => {
       console.error('Firebase 저장 실패', err);
     });
   }, 500);
@@ -311,17 +375,18 @@ function handleAuthStateChange() {
       loginBtn.style.display = 'none';
       userInfo.style.display = 'flex';
       userEmailSpan.textContent = user.email;
-      syncStatus.innerHTML = '<span class="sync-on">☁️ 클라우드 동기화 중</span>';
+      updateStorageDisplay();
       // 최초 인증 시에만 원격 세션으로 자동 복원 (그 후에는 사용자가 선택한 세션 유지)
       if (!initialFirebaseSyncDone) {
         initialFirebaseSyncDone = true;
         await syncFromFirebase();
+        updateStorageDisplay();
       }
     } else {
       initialFirebaseSyncDone = false;
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
-      syncStatus.innerHTML = '<span class="sync-off">💾 로컬 저장소 사용 중 (로그인 시 동기화)</span>';
+      updateStorageDisplay();
     }
   });
 }
@@ -360,6 +425,8 @@ async function syncFromFirebase() {
 
 // 초기화
 async function init() {
+  // 초기 스토리지 표시
+  updateStorageDisplay();
   // UI 이벤트는 가장 먼저 바인딩 (네트워크 오류와 무관하게 동작하도록)
   generateBtn.addEventListener('click', generateEmail);
   copyBtn.addEventListener('click', copyEmail);
