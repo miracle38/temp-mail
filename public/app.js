@@ -321,7 +321,19 @@ async function restoreSession(saved) {
 function bindAuthEvents() {
   loginBtn.addEventListener('click', () => { loginModal.style.display = 'flex'; });
   closeModalBtn.addEventListener('click', () => { loginModal.style.display = 'none'; });
-  logoutBtn.addEventListener('click', () => firebase.auth().signOut());
+  logoutBtn.addEventListener('click', () => {
+    if (!confirm('로그아웃 하시겠습니까?\n(클라우드 동기화가 중단되고 로컬 저장소만 사용됩니다)')) return;
+    firebase.auth().signOut();
+  });
+  // 로그인 입력 필드에서 Enter 키 → 이메일 로그인
+  const submitLogin = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      emailLoginBtn.click();
+    }
+  };
+  loginEmail.addEventListener('keydown', submitLogin);
+  loginPassword.addEventListener('keydown', submitLogin);
   emailLoginBtn.addEventListener('click', () => {
     const email = loginEmail.value.trim();
     const pw = loginPassword.value;
