@@ -717,7 +717,9 @@ async function init() {
   backBtn.addEventListener('click', closeViewer);
   prevMailBtn.addEventListener('click', goToPrevMail);
   nextMailBtn.addEventListener('click', goToNextMail);
-  // 키보드 단축키: ↑ 최근, ↓ 예전, Esc 목록으로
+  const deleteMailBtn = document.getElementById('deleteMailBtn');
+  if (deleteMailBtn) deleteMailBtn.addEventListener('click', deleteCurrentViewerMail);
+  // 키보드 단축키: ↑ 최근, ↓ 예전, Esc 목록으로, Delete 메일 삭제
   document.addEventListener('keydown', (e) => {
     if (viewerSection.style.display === 'none' || viewerSection.style.display === '') return;
     // 입력 필드에 포커스가 있으면 무시
@@ -725,6 +727,7 @@ async function init() {
     if (e.key === 'ArrowUp') { e.preventDefault(); goToPrevMail(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); goToNextMail(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeViewer(); }
+    else if (e.key === 'Delete') { e.preventDefault(); deleteCurrentViewerMail(); }
   });
   bindAuthEvents();
   handleAuthStateChange();
@@ -1176,12 +1179,64 @@ function renderInbox(messages) {
         <div class="mail-subject">${escapeHtml(msg.subject || '(제목 없음)')}</div>
       </div>
       <div class="mail-date">${formatDate(msg.createdAt)}</div>
+      <button class="mail-delete-btn" title="메일 삭제" aria-label="메일 삭제">✕</button>
     `;
+    const delBtn = item.querySelector('.mail-delete-btn');
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('이 메일을 삭제할까요?')) return;
+      await deleteMail(msg.id);
+    });
     inbox.appendChild(item);
   });
 }
 
 // 메일 읽음 처리 (서버 + UI + 캐시)
+// 메일 삭제 (서버 + 캐시 + UI)
+async function deleteMail(id, { showSuccessToast = true } = {}) {
+  if (!currentEmail || !id) return false;
+  // 서버에 DELETE 요청 (실패해도 로컬에서 삭제 진행)
+  try {
+    await apiFetch(`${currentEmail.apiBase}/messages/${id}`, { method: 'DELETE' });
+  } catch {}
+  // 캐시에서도 제거
+  const cache = getMessageCache(currentEmail.address);
+  if (cache[id]) {
+    delete cache[id];
+    setMessageCache(currentEmail.address, cache);
+  }
+  knownIds.delete(id);
+  // currentMailList에서도 제거하고 index 갱신
+  const removedIdx = currentMailList.findIndex(m => m.id === id);
+  if (removedIdx >= 0) currentMailList.splice(removedIdx, 1);
+  if (currentMailIndex === removedIdx) currentMailIndex = Math.min(currentMailIndex, currentMailList.length - 1);
+  else if (currentMailIndex > removedIdx) currentMailIndex--;
+  // UI 다시 그리기
+  const combined = Object.values(cache);
+  renderInbox(combined);
+  renderHistory();
+  if (showSuccessToast) showToast('메일이 삭제되었습니다', 'success');
+  return true;
+}
+
+// 현재 뷰어에 표시된 메일 삭제 (+ 다음 메일로 이동 또는 목록 복귀)
+async function deleteCurrentViewerMail() {
+  if (currentMailIndex < 0 || !currentMailList[currentMailIndex]) return;
+  const current = currentMailList[currentMailIndex];
+  if (!confirm('이 메일을 삭제할까요?')) return;
+  const prevIndex = currentMailIndex;
+  await deleteMail(current.id);
+  // 삭제 후 남은 메일이 있으면 같은 위치(= 다음 메일)로 이동, 없으면 목록 복귀
+  if (currentMailList.length > 0) {
+    const nextIndex = Math.min(prevIndex, currentMailList.length - 1);
+    const next = currentMailList[nextIndex];
+    const items = inbox.querySelectorAll('.mail-item');
+    readMessage(next.id, items[nextIndex]);
+  } else {
+    closeViewer();
+  }
+}
+
 async function markAsRead(id, itemEl) {
   if (itemEl && itemEl.classList.contains('unread')) {
     itemEl.classList.remove('unread');
