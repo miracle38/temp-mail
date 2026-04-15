@@ -46,6 +46,11 @@ const STORAGE_KEY = 'tempmail_current';
 const HISTORY_KEY = 'tempmail_history';
 const MSG_CACHE_PREFIX = 'tempmail_msgs_';
 
+// Firebase 키 안전화 (`.`, `@` 등 금지 문자 변환)
+function addressToKey(addr) {
+  return addr.replace(/\./g, '_dot_').replace(/@/g, '_at_');
+}
+
 // 메일 캐시: 계정별로 받은 메일을 영구 보관 (mail.tm이 삭제해도 유지)
 function getMessageCache(address) {
   try {
@@ -65,6 +70,61 @@ function setMessageCache(address, cache) {
       localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(reduced));
     } catch {}
   }
+  // Firebase에도 디바운스로 동기화
+  syncMailCacheToFirebase(address);
+}
+
+// 메일 캐시 → Firebase 동기화 (디바운스)
+const _mailSyncTimers = {};
+function syncMailCacheToFirebase(address) {
+  if (!currentUser || !db || !address) return;
+  clearTimeout(_mailSyncTimers[address]);
+  _mailSyncTimers[address] = setTimeout(() => {
+    const cache = getMessageCache(address);
+    const key = addressToKey(address);
+    db.ref(`tempmail/${currentUser.uid}/messages/${key}`).set(cache).catch(err => {
+      console.error('메일 캐시 클라우드 저장 실패', err);
+    });
+  }, 2000);
+}
+
+// Firebase에서 메일 캐시 불러오기 (로컬에 병합)
+async function loadMailCacheFromFirebase(address) {
+  if (!currentUser || !db || !address) return;
+  try {
+    const key = addressToKey(address);
+    const snap = await db.ref(`tempmail/${currentUser.uid}/messages/${key}`).get();
+    if (!snap.exists()) return;
+    const remote = snap.val() || {};
+    const local = getMessageCache(address);
+    // 병합 (캐시본 표시는 다시 fetchInbox에서 갱신됨)
+    const merged = { ...remote, ...local };
+    Object.keys(remote).forEach(id => {
+      if (!local[id]) merged[id] = remote[id];
+    });
+    try {
+      localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(merged));
+    } catch {}
+  } catch (err) {
+    console.error('메일 캐시 클라우드 로드 실패', err);
+  }
+}
+
+// 만료된 히스토리/캐시 정리 (retentionAt이 지난 메일 주소)
+async function pruneExpiredAccounts() {
+  const now = new Date();
+  const history = getHistory();
+  const valid = history.filter(h => !h.retentionAt || new Date(h.retentionAt) > now);
+  if (valid.length === history.length) return 0;
+  const expired = history.filter(h => h.retentionAt && new Date(h.retentionAt) <= now);
+  for (const h of expired) {
+    try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+    if (currentUser && db) {
+      try { await db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
+    }
+  }
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(valid));
+  return expired.length;
 }
 
 // Firebase 상태
@@ -185,6 +245,8 @@ async function restoreSession(saved) {
     refreshBtn.disabled = false;
     knownIds.clear();
     clearInbox();
+    // Firebase 캐시 먼저 병합 (다른 브라우저에서 본 메일도 표시)
+    await loadMailCacheFromFirebase(account.address);
     // 캐시된 메일 즉시 표시 (서버 응답 기다리지 않고)
     const cached = Object.values(getMessageCache(account.address));
     if (cached.length > 0) {
@@ -263,6 +325,8 @@ function handleAuthStateChange() {
       if (!initialFirebaseSyncDone) {
         initialFirebaseSyncDone = true;
         await syncFromFirebase();
+        // Firebase에 있는 만료된 메일 캐시도 정리
+        try { await pruneExpiredAccounts(); } catch {}
       }
     } else {
       initialFirebaseSyncDone = false;
@@ -306,6 +370,11 @@ async function syncFromFirebase() {
 
 // 초기화
 async function init() {
+  // 만료된 계정 / 메일 캐시 정리
+  try {
+    const removed = await pruneExpiredAccounts();
+    if (removed > 0) showToast(`만료된 메일 주소 ${removed}개를 정리했습니다`, 'info');
+  } catch {}
   // UI 이벤트는 가장 먼저 바인딩 (네트워크 오류와 무관하게 동작하도록)
   generateBtn.addEventListener('click', generateEmail);
   copyBtn.addEventListener('click', copyEmail);
@@ -964,9 +1033,13 @@ function renderHistory() {
           showToast(`${h.address}로 전환되었습니다`);
         } else {
           showToast('세션이 만료되었습니다. 새 메일을 생성해주세요.');
-          // 만료된 항목 제거
+          // 만료된 항목 제거 + 메일 캐시 정리
           const updated = getHistory().filter(x => x.address !== h.address);
           localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+          try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+          if (currentUser && db) {
+            try { db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
+          }
           renderHistory();
           syncToFirebase();
         }
@@ -988,8 +1061,11 @@ function renderHistory() {
       }
       const updated = getHistory().filter(x => x.address !== h.address);
       localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-      // 메일 캐시도 함께 삭제
+      // 로컬 + Firebase 메일 캐시 모두 삭제
       try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
+      if (currentUser && db) {
+        try { db.ref(`tempmail/${currentUser.uid}/messages/${addressToKey(h.address)}`).remove(); } catch {}
+      }
       renderHistory();
       syncToFirebase();
       showToast('삭제되었습니다');
