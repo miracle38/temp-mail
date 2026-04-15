@@ -1,3 +1,6 @@
+// mail.tm API 직접 호출
+const API_BASE = 'https://api.mail.tm';
+
 // 상태
 let currentEmail = null;   // { address, password, token }
 let refreshTimer = null;
@@ -45,8 +48,9 @@ async function init() {
 // 도메인 목록 로드
 async function loadDomains() {
   try {
-    const res = await fetch('/api/domains');
-    domains = await res.json();
+    const res = await fetch(`${API_BASE}/domains`);
+    const data = await res.json();
+    domains = (data['hydra:member'] || []).map(d => d.domain);
     domainSelect.innerHTML = '';
     domains.forEach(d => {
       const opt = document.createElement('option');
@@ -74,18 +78,18 @@ async function createAccount(address) {
   const password = randomString(16);
 
   // 계정 생성
-  const createRes = await fetch('/api/accounts', {
+  const createRes = await fetch(`${API_BASE}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
   });
   if (!createRes.ok) {
     const err = await createRes.json();
-    throw new Error(err['hydra:description'] || err.error || '계정 생성 실패');
+    throw new Error(err['hydra:description'] || err.detail || '계정 생성 실패');
   }
 
   // 토큰 발급
-  const tokenRes = await fetch('/api/token', {
+  const tokenRes = await fetch(`${API_BASE}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -190,10 +194,11 @@ async function applyCustom() {
 async function fetchInbox() {
   if (!currentEmail) return;
   try {
-    const res = await fetch('/api/messages', {
+    const res = await fetch(`${API_BASE}/messages`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
-    const messages = await res.json();
+    const data = await res.json();
+    const messages = data['hydra:member'] || [];
     if (!Array.isArray(messages)) return;
 
     // 새 메일 알림
@@ -246,7 +251,7 @@ function renderInbox(messages) {
 // 메일 읽기
 async function readMessage(id) {
   try {
-    const res = await fetch(`/api/messages/${id}`, {
+    const res = await fetch(`${API_BASE}/messages/${id}`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
     const msg = await res.json();
