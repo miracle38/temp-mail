@@ -46,6 +46,9 @@ const STORAGE_KEY = 'tempmail_current';
 const HISTORY_KEY = 'tempmail_history';
 const MSG_CACHE_PREFIX = 'tempmail_msgs_';
 
+// 이전 메일 주소 보관 최대 개수
+const MAX_HISTORY = 10;
+
 // Firebase 키 안전화 (`.`, `@` 등 금지 문자 변환)
 function addressToKey(addr) {
   return addr.replace(/\./g, '_dot_').replace(/@/g, '_at_');
@@ -168,9 +171,8 @@ function saveSession() {
     // 기존 항목: 같은 위치에서 업데이트 (넘버링 유지)
     history[idx] = entry;
   } else {
-    // 새 항목: 맨 앞에 추가
+    // 새 항목: 맨 앞에 추가 (자동 삭제 없음)
     history.unshift(entry);
-    if (history.length > 10) history.pop();
   }
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   renderHistory();
@@ -353,7 +355,8 @@ async function syncFromFirebase() {
     if (!merged.find(r => r.address === l.address)) merged.push(l);
   });
   merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  const finalHistory = merged.slice(0, 10);
+  // 클라우드 병합 시에도 MAX_HISTORY 초과분은 보관하지 않음 (오래된 것부터 잘라냄)
+  const finalHistory = merged.slice(0, MAX_HISTORY);
   localStorage.setItem(HISTORY_KEY, JSON.stringify(finalHistory));
 
   // 현재 세션: remote 우선 (최신 사용 기기의 것)
@@ -530,6 +533,10 @@ async function generateEmail() {
     showToast('도메인 목록을 불러오지 못했습니다. 네트워크를 확인 후 페이지를 새로고침 해주세요.', 'error');
     return;
   }
+  if (getHistory().length >= MAX_HISTORY) {
+    showToast(`이전 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
+    return;
+  }
   generateBtn.disabled = true;
   generateBtn.innerHTML = '<span class="loading"></span>생성 중...';
   try {
@@ -632,6 +639,14 @@ async function applyCustom() {
   }
   if (!domain) {
     showToast('도메인을 선택해주세요', 'error');
+    return;
+  }
+  // 기존 항목과 같은 주소면 통과(전환), 새 주소면 한도 체크
+  const existingHistory = getHistory();
+  const targetAddress = `${login}@${domain}`;
+  const exists = existingHistory.find(h => h.address === targetAddress);
+  if (!exists && existingHistory.length >= MAX_HISTORY) {
+    showToast(`이전 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
     return;
   }
   customApplyBtn.disabled = true;
@@ -1008,7 +1023,12 @@ function toggleAutoRefresh() {
 function renderHistory() {
   const section = document.getElementById('historySection');
   const list = document.getElementById('historyList');
+  const countEl = document.getElementById('historyCount');
   const history = getHistory();
+  if (countEl) {
+    countEl.textContent = `(${history.length} / ${MAX_HISTORY})`;
+    countEl.className = 'history-count' + (history.length >= MAX_HISTORY ? ' history-count-full' : '');
+  }
   if (history.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
   list.innerHTML = '';
