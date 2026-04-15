@@ -39,6 +39,28 @@ const toast = document.getElementById('toast');
 // localStorage 키
 const STORAGE_KEY = 'tempmail_current';
 const HISTORY_KEY = 'tempmail_history';
+const MSG_CACHE_PREFIX = 'tempmail_msgs_';
+
+// 메일 캐시: 계정별로 받은 메일을 영구 보관 (mail.tm이 삭제해도 유지)
+function getMessageCache(address) {
+  try {
+    return JSON.parse(localStorage.getItem(MSG_CACHE_PREFIX + address) || '{}');
+  } catch { return {}; }
+}
+
+function setMessageCache(address, cache) {
+  try {
+    localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(cache));
+  } catch (e) {
+    // 용량 초과 시 가장 오래된 항목 제거 후 재시도
+    try {
+      const sorted = Object.values(cache).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      const reduced = {};
+      sorted.slice(Math.floor(sorted.length / 2)).forEach(m => { reduced[m.id] = m; });
+      localStorage.setItem(MSG_CACHE_PREFIX + address, JSON.stringify(reduced));
+    } catch {}
+  }
+}
 
 // Firebase 상태
 let db = null;
@@ -157,8 +179,14 @@ async function restoreSession(saved) {
     copyBtn.disabled = false;
     refreshBtn.disabled = false;
     knownIds.clear();
-    clearInbox();  // 이전 목록 비우고 로딩 상태로
-    // 첫 fetch는 반드시 완료 후 자동 새로고침 시작 (경쟁 조건 방지)
+    clearInbox();
+    // 캐시된 메일 즉시 표시 (서버 응답 기다리지 않고)
+    const cached = Object.values(getMessageCache(account.address));
+    if (cached.length > 0) {
+      cached.forEach(m => { m._cachedOnly = true; knownIds.add(m.id); });
+      renderInbox(cached);
+    }
+    // 첫 fetch는 반드시 완료 후 자동 새로고침 시작
     await fetchInbox();
     startAutoRefresh();
     updateRetentionDisplay();
@@ -633,7 +661,22 @@ async function fetchInbox({ manual = false } = {}) {
     if (!view || !view['hydra:next']) break;
   }
 
-  // 새 메일 알림
+  // 캐시와 병합: 서버에 더 이상 없어도 캐시된 메일은 유지
+  const cache = getMessageCache(currentEmail.address);
+  // 새로 가져온 메일은 캐시에 추가/업데이트
+  allMessages.forEach(m => {
+    cache[m.id] = { ...cache[m.id], ...m, _cachedOnly: false };
+  });
+  // 캐시에는 있지만 이번 fetch에 없는 메일은 _cachedOnly 표시
+  const serverIds = new Set(allMessages.map(m => m.id));
+  Object.values(cache).forEach(m => {
+    if (!serverIds.has(m.id)) m._cachedOnly = true;
+  });
+  setMessageCache(currentEmail.address, cache);
+
+  const combined = Object.values(cache);
+
+  // 새 메일 알림 (서버에서 새로 가져온 것만)
   if (knownIds.size > 0) {
     const newMails = allMessages.filter(m => !knownIds.has(m.id));
     if (newMails.length > 0) {
@@ -641,8 +684,8 @@ async function fetchInbox({ manual = false } = {}) {
     }
   }
 
-  allMessages.forEach(m => knownIds.add(m.id));
-  renderInbox(allMessages);
+  combined.forEach(m => knownIds.add(m.id));
+  renderInbox(combined);
 }
 
 // 메일 목록 렌더링
@@ -672,11 +715,12 @@ function renderInbox(messages) {
 
     const fromAddr = msg.from?.address || msg.from?.name || '?';
     const initial = fromAddr[0].toUpperCase();
+    const cachedBadge = msg._cachedOnly ? '<span class="cache-badge" title="서버에서 삭제됨 (캐시본)">💾</span>' : '';
     item.innerHTML = `
       <div class="mail-indicator" title="${isUnread ? '읽지 않음' : '읽음'}"></div>
       <div class="mail-avatar">${initial}</div>
       <div class="mail-content">
-        <div class="mail-from">${escapeHtml(fromAddr)}</div>
+        <div class="mail-from">${escapeHtml(fromAddr)} ${cachedBadge}</div>
         <div class="mail-subject">${escapeHtml(msg.subject || '(제목 없음)')}</div>
       </div>
       <div class="mail-date">${formatDate(msg.createdAt)}</div>
@@ -709,24 +753,41 @@ async function markAsRead(id, itemEl) {
 // 메일 읽기
 async function readMessage(id, itemEl) {
   try {
+    let msg = null;
+    let fromCache = false;
     const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
-    if (!result || result.error) {
-      if (result?.error === 'unauthorized') {
-        showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
-      } else if (result?.error === 'network') {
-        showToast('네트워크 오류: 연결을 확인해주세요', 'error');
-      } else if (result?.status === 404) {
-        showToast('메일이 삭제되었거나 존재하지 않습니다', 'error');
+    if (result && !result.error && result.data) {
+      msg = result.data;
+      // 본문도 캐시에 저장
+      const cache = getMessageCache(currentEmail.address);
+      cache[id] = { ...cache[id], ...msg, _cachedFull: true };
+      setMessageCache(currentEmail.address, cache);
+    } else {
+      // 서버 실패 → 캐시에서 읽기 시도
+      const cache = getMessageCache(currentEmail.address);
+      if (cache[id] && cache[id]._cachedFull) {
+        msg = cache[id];
+        fromCache = true;
+        showToast('서버에서 메일이 삭제되어 캐시본을 표시합니다', 'info');
+      } else if (cache[id]) {
+        // 메타데이터만 있고 본문 없음
+        showToast('서버에서 메일이 삭제되었습니다 (본문 캐시 없음)', 'error');
+        return;
       } else {
-        showToast(`메일을 불러오지 못했습니다 (오류 ${result?.status || ''})`, 'error');
+        if (result?.error === 'unauthorized') {
+          showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
+        } else if (result?.error === 'network') {
+          showToast('네트워크 오류: 연결을 확인해주세요', 'error');
+        } else {
+          showToast(`메일을 불러오지 못했습니다 (오류 ${result?.status || ''})`, 'error');
+        }
+        return;
       }
-      return;
     }
-    const msg = result.data;
     if (!msg) { showToast('메일을 불러오지 못했습니다', 'error'); return; }
 
-    // 읽음 처리
-    markAsRead(id, itemEl);
+    // 읽음 처리 (캐시본은 서버 PATCH 안 함)
+    if (!fromCache) markAsRead(id, itemEl);
 
     viewerSubject.textContent = msg.subject || '(제목 없음)';
     viewerFrom.textContent = msg.from?.address || msg.from?.name || '';
@@ -871,6 +932,8 @@ function renderHistory() {
       }
       const updated = getHistory().filter(x => x.address !== h.address);
       localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+      // 메일 캐시도 함께 삭제
+      try { localStorage.removeItem(MSG_CACHE_PREFIX + h.address); } catch {}
       renderHistory();
       syncToFirebase();
       showToast('삭제되었습니다');
