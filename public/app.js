@@ -77,9 +77,14 @@ function saveSession() {
     retentionAt: currentEmail.retentionAt,
     createdAt: idx >= 0 ? history[idx].createdAt : new Date().toISOString(),
   };
-  if (idx >= 0) history.splice(idx, 1);
-  history.unshift(entry);
-  if (history.length > 10) history.pop();
+  if (idx >= 0) {
+    // 기존 항목: 같은 위치에서 업데이트 (넘버링 유지)
+    history[idx] = entry;
+  } else {
+    // 새 항목: 맨 앞에 추가
+    history.unshift(entry);
+    if (history.length > 10) history.pop();
+  }
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   renderHistory();
   // Firebase 동기화
