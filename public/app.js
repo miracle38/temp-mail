@@ -277,7 +277,7 @@ async function init() {
   customBtn.addEventListener('click', toggleCustom);
   customApplyBtn.addEventListener('click', applyCustom);
   autoRefreshCheck.addEventListener('change', toggleAutoRefresh);
-  refreshBtn.addEventListener('click', fetchInbox);
+  refreshBtn.addEventListener('click', () => fetchInbox({ manual: true }));
   backBtn.addEventListener('click', closeViewer);
   bindAuthEvents();
   handleAuthStateChange();
@@ -534,31 +534,100 @@ async function applyCustom() {
   }
 }
 
-// 받은 메일 가져오기
-async function fetchInbox() {
-  if (!currentEmail) return;
+// 토큰 재발급
+async function refreshToken() {
+  if (!currentEmail) return false;
   try {
-    const res = await fetch(`${currentEmail.apiBase}/messages`, {
-      headers: { Authorization: `Bearer ${currentEmail.token}` },
+    const res = await fetch(`${currentEmail.apiBase}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: currentEmail.address, password: currentEmail.password }),
     });
     const data = await safeJson(res);
-    if (!data) return;
-    const messages = data['hydra:member'] || [];
-    if (!Array.isArray(messages)) return;
+    if (!res.ok || !data?.token) return false;
+    currentEmail.token = data.token;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
+    return true;
+  } catch { return false; }
+}
 
-    // 새 메일 알림
-    if (knownIds.size > 0) {
-      const newMails = messages.filter(m => !knownIds.has(m.id));
-      if (newMails.length > 0) {
-        showToast(`새 메일 ${newMails.length}통이 도착했습니다!`);
+// 재시도 + 토큰 자동 재발급 + Rate limit 대응
+async function apiFetch(url, options = {}, { maxRetries = 2, silentOn429 = false } = {}) {
+  if (!currentEmail) return null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${currentEmail.token}`,
+          ...(options.headers || {}),
+        },
+      });
+      // 401: 토큰 만료 → 재발급 후 재시도
+      if (res.status === 401 && attempt < maxRetries) {
+        const ok = await refreshToken();
+        if (ok) continue;
+        return { error: 'unauthorized', status: 401 };
+      }
+      // 429: Rate limit → 백오프 후 재시도
+      if (res.status === 429 && attempt < maxRetries) {
+        const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10);
+        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
+      if (!res.ok) {
+        return { error: 'http', status: res.status };
+      }
+      const data = await safeJson(res);
+      return { data, status: res.status };
+    } catch (err) {
+      // 네트워크 오류 → 재시도
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      return { error: 'network', message: err.message };
+    }
+  }
+  return { error: 'unknown' };
+}
+
+// 받은 메일 가져오기
+async function fetchInbox({ manual = false } = {}) {
+  if (!currentEmail) return;
+  const result = await apiFetch(`${currentEmail.apiBase}/messages`);
+  if (!result) return;
+  if (result.error) {
+    // 에러 처리
+    if (manual) {
+      // 수동 새로고침일 때만 사용자에게 알림
+      if (result.error === 'unauthorized') {
+        showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
+      } else if (result.error === 'network') {
+        showToast('네트워크 오류: 연결을 확인해주세요', 'error');
+      } else if (result.status === 429) {
+        showToast('요청이 너무 많습니다. 잠시 후 다시 시도해주세요', 'error');
+      } else {
+        showToast(`메일 목록을 불러오지 못했습니다 (오류 ${result.status || ''})`, 'error');
       }
     }
-
-    messages.forEach(m => knownIds.add(m.id));
-    renderInbox(messages);
-  } catch {
-    // 자동 새로고침 중 에러는 무시
+    return;
   }
+  const data = result.data;
+  if (!data) return;
+  const messages = data['hydra:member'] || [];
+  if (!Array.isArray(messages)) return;
+
+  // 새 메일 알림
+  if (knownIds.size > 0) {
+    const newMails = messages.filter(m => !knownIds.has(m.id));
+    if (newMails.length > 0) {
+      showToast(`새 메일 ${newMails.length}통이 도착했습니다!`, 'info');
+    }
+  }
+
+  messages.forEach(m => knownIds.add(m.id));
+  renderInbox(messages);
 }
 
 // 메일 목록 렌더링
@@ -615,26 +684,31 @@ async function markAsRead(id, itemEl) {
       mailCount.textContent = totalEls.length;
     }
   }
-  try {
-    await fetch(`${currentEmail.apiBase}/messages/${id}`, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${currentEmail.token}`,
-        'Content-Type': 'application/merge-patch+json',
-      },
-      body: JSON.stringify({ seen: true }),
-    });
-  } catch { /* 실패 시 조용히 무시 */ }
+  await apiFetch(`${currentEmail.apiBase}/messages/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/merge-patch+json' },
+    body: JSON.stringify({ seen: true }),
+  });
 }
 
 // 메일 읽기
 async function readMessage(id, itemEl) {
   try {
-    const res = await fetch(`${currentEmail.apiBase}/messages/${id}`, {
-      headers: { Authorization: `Bearer ${currentEmail.token}` },
-    });
-    const msg = await safeJson(res);
-    if (!msg) { showToast('메일을 불러오지 못했습니다'); return; }
+    const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
+    if (!result || result.error) {
+      if (result?.error === 'unauthorized') {
+        showToast('세션이 만료되어 재로그인이 필요합니다', 'error');
+      } else if (result?.error === 'network') {
+        showToast('네트워크 오류: 연결을 확인해주세요', 'error');
+      } else if (result?.status === 404) {
+        showToast('메일이 삭제되었거나 존재하지 않습니다', 'error');
+      } else {
+        showToast(`메일을 불러오지 못했습니다 (오류 ${result?.status || ''})`, 'error');
+      }
+      return;
+    }
+    const msg = result.data;
+    if (!msg) { showToast('메일을 불러오지 못했습니다', 'error'); return; }
 
     // 읽음 처리
     markAsRead(id, itemEl);
