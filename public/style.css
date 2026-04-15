@@ -515,7 +515,9 @@ body {
 .inbox {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
+  min-width: 0;
 }
 
 .empty-state {
@@ -544,6 +546,8 @@ body {
   transition: background 0.15s;
   border-bottom: 1px solid #f1f5f9;
   position: relative;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .mail-item:last-child { border-bottom: none; }
@@ -626,8 +630,10 @@ body {
 }
 
 .mail-content {
-  flex: 1;
+  flex: 1 1 0%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .mail-from {
@@ -638,6 +644,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .mail-subject {
@@ -646,6 +653,8 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
 }
 
 .mail-date {
