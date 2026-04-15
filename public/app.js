@@ -435,7 +435,7 @@ function updateRetentionDisplay() {
   if (days > 0) remaining = `${days}일 ${hours}시간 남음`;
   else if (hours > 0) remaining = `${hours}시간 ${minutes}분 남음`;
   else remaining = `${minutes}분 남음`;
-  const expiryStr = expiry.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const expiryStr = formatDate(expiry.toISOString());
   el.innerHTML = `<span class="retention-label">삭제 예정:</span> <span class="retention-remaining">${remaining}</span> <span class="retention-date">(${expiryStr})</span>`;
 }
 
@@ -715,12 +715,12 @@ function formatDate(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   if (isNaN(d)) return dateStr;
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  }
-  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 // 유틸: 파일 크기 포맷
