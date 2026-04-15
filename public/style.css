@@ -750,13 +750,21 @@ body {
   padding: 16px 18px;
   font-size: 0.9rem;
   line-height: 1.65;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .viewer-body img { max-width: 100%; height: auto; }
+.viewer-body * { max-width: 100%; }
+.viewer-body pre, .viewer-body code { white-space: pre-wrap; word-break: break-word; }
+.viewer-body a { word-break: break-all; }
 
 .mail-html-frame {
   width: 100%;

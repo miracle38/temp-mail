@@ -1298,7 +1298,17 @@ async function readMessage(id, itemEl) {
       // sandbox=""로 모든 권한 차단: script 실행, form 제출, popup, top 이동 모두 금지
       // (이미지/CSS는 정상 렌더링됨)
       iframe.setAttribute('sandbox', '');
-      iframe.srcdoc = msg.html.join('');
+      // 강제 줄바꿈 스타일 주입 (긴 URL/테이블도 뷰어 폭을 넘지 않도록)
+      const wrapStyle = `<style>
+        html, body { max-width: 100% !important; overflow-x: hidden !important; box-sizing: border-box !important; margin: 0 !important; padding: 0 !important; word-wrap: break-word !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
+        body { padding: 8px !important; }
+        * { max-width: 100% !important; box-sizing: border-box !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
+        img, video, iframe, embed, object { max-width: 100% !important; height: auto !important; }
+        pre, code { white-space: pre-wrap !important; word-wrap: break-word !important; overflow-x: auto !important; }
+        table { max-width: 100% !important; display: block !important; overflow-x: auto !important; }
+        a { word-break: break-all !important; }
+      </style>`;
+      iframe.srcdoc = wrapStyle + msg.html.join('');
       iframe.className = 'mail-html-frame';
       viewerBody.appendChild(iframe);
     } else if (msg.text) {
