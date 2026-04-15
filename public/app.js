@@ -1,11 +1,14 @@
-// mail.tm API 직접 호출
-const API_BASE = 'https://api.mail.tm';
+// 멀티 API 지원 (mail.tm + mail.gw)
+const API_PROVIDERS = [
+  { name: 'mail.tm', base: 'https://api.mail.tm' },
+  { name: 'mail.gw', base: 'https://api.mail.gw' },
+];
 
 // 상태
-let currentEmail = null;   // { address, password, token }
+let currentEmail = null;   // { address, password, token, apiBase }
 let refreshTimer = null;
 let countdown = 5;
-let domains = [];
+let domains = [];          // { domain, apiBase }[]
 let knownIds = new Set();
 
 // DOM 요소
@@ -45,22 +48,33 @@ async function init() {
   backBtn.addEventListener('click', closeViewer);
 }
 
-// 도메인 목록 로드
+// 도메인 목록 로드 (모든 API에서 수집)
 async function loadDomains() {
-  try {
-    const res = await fetch(`${API_BASE}/domains`);
-    const data = await res.json();
-    domains = (data['hydra:member'] || []).map(d => d.domain);
-    domainSelect.innerHTML = '';
-    domains.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = d;
-      domainSelect.appendChild(opt);
-    });
-  } catch {
+  domains = [];
+  const results = await Promise.allSettled(
+    API_PROVIDERS.map(async (provider) => {
+      const res = await fetch(`${provider.base}/domains`);
+      const data = await res.json();
+      return (data['hydra:member'] || []).map(d => ({
+        domain: d.domain,
+        apiBase: provider.base,
+      }));
+    })
+  );
+  results.forEach(r => {
+    if (r.status === 'fulfilled') domains.push(...r.value);
+  });
+  if (domains.length === 0) {
     showToast('도메인 목록을 불러오지 못했습니다');
+    return;
   }
+  domainSelect.innerHTML = '';
+  domains.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d.domain;
+    opt.textContent = d.domain;
+    domainSelect.appendChild(opt);
+  });
 }
 
 // 랜덤 문자열 생성
@@ -73,12 +87,20 @@ function randomString(len) {
   return result;
 }
 
+// 도메인으로 API base URL 찾기
+function getApiBase(domain) {
+  const entry = domains.find(d => d.domain === domain);
+  return entry ? entry.apiBase : API_PROVIDERS[0].base;
+}
+
 // 계정 생성 및 토큰 발급
 async function createAccount(address) {
+  const domain = address.split('@')[1];
+  const apiBase = getApiBase(domain);
   const password = randomString(16);
 
   // 계정 생성
-  const createRes = await fetch(`${API_BASE}/accounts`, {
+  const createRes = await fetch(`${apiBase}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -89,7 +111,7 @@ async function createAccount(address) {
   }
 
   // 토큰 발급
-  const tokenRes = await fetch(`${API_BASE}/token`, {
+  const tokenRes = await fetch(`${apiBase}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -99,7 +121,7 @@ async function createAccount(address) {
   }
   const tokenData = await tokenRes.json();
 
-  return { address, password, token: tokenData.token };
+  return { address, password, token: tokenData.token, apiBase };
 }
 
 // 랜덤 메일 생성
@@ -194,7 +216,7 @@ async function applyCustom() {
 async function fetchInbox() {
   if (!currentEmail) return;
   try {
-    const res = await fetch(`${API_BASE}/messages`, {
+    const res = await fetch(`${currentEmail.apiBase}/messages`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
     const data = await res.json();
@@ -251,7 +273,7 @@ function renderInbox(messages) {
 // 메일 읽기
 async function readMessage(id) {
   try {
-    const res = await fetch(`${API_BASE}/messages/${id}`, {
+    const res = await fetch(`${currentEmail.apiBase}/messages/${id}`, {
       headers: { Authorization: `Bearer ${currentEmail.token}` },
     });
     const msg = await res.json();
