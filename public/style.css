@@ -5,7 +5,7 @@
 }
 
 html, body {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
@@ -14,6 +14,7 @@ body {
   color: #e2e8f0;
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
 
 /* 상단 헤더 */
@@ -86,6 +87,12 @@ body {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+}
+
+/* 화면이 충분히 높을 때만 내부 스크롤 (그 외는 페이지 전체 스크롤) */
+@media (min-height: 700px) and (min-width: 1001px) {
+  html, body { height: 100%; min-height: 100%; overflow: hidden; }
+  body { height: 100vh; }
 }
 
 /* 공통 섹션 */
@@ -669,8 +676,25 @@ body {
     grid-template-columns: 1fr;
   }
   .sidebar { max-height: none; }
-  .history-section { min-height: 150px; max-height: 300px; }
+  .history-section {
+    min-height: 150px;
+    max-height: none;  /* 모바일에서는 잘리지 않고 자연스럽게 펼쳐짐 */
+    overflow: visible;
+  }
+  .history-list { overflow: visible; }
   .main-panel { min-height: 500px; }
+  .inbox-wrapper { min-height: 400px; }
+}
+
+/* 윈도우 높이가 낮을 때는 내부 스크롤 대신 페이지 전체 스크롤 */
+@media (max-height: 699px) {
+  .history-section {
+    max-height: none;
+    overflow: visible;
+  }
+  .history-list { overflow: visible; }
+  .sidebar, .main-panel { min-height: 0; }
+  .inbox-wrapper { min-height: 400px; }
 }
 
 @media (max-width: 600px) {
