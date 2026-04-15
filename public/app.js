@@ -44,13 +44,20 @@ const HISTORY_KEY = 'tempmail_history';
 function saveSession() {
   if (!currentEmail) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(currentEmail));
-  // 히스토리에 추가 (중복 방지, 최대 10개)
+  // 히스토리에 추가/업데이트 (중복 방지, 최대 10개)
   const history = getHistory();
-  if (!history.find(h => h.address === currentEmail.address)) {
-    history.unshift({ address: currentEmail.address, password: currentEmail.password, apiBase: currentEmail.apiBase, createdAt: new Date().toISOString() });
-    if (history.length > 10) history.pop();
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  }
+  const idx = history.findIndex(h => h.address === currentEmail.address);
+  const entry = {
+    address: currentEmail.address,
+    password: currentEmail.password,
+    apiBase: currentEmail.apiBase,
+    retentionAt: currentEmail.retentionAt,
+    createdAt: idx >= 0 ? history[idx].createdAt : new Date().toISOString(),
+  };
+  if (idx >= 0) history.splice(idx, 1);
+  history.unshift(entry);
+  if (history.length > 10) history.pop();
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   renderHistory();
 }
 
@@ -80,7 +87,10 @@ async function restoreSession(saved) {
     });
     const tokenData = await safeJson(tokenRes);
     if (!tokenRes.ok || !tokenData?.token) return false;
-    const account = { address: saved.address, password: saved.password, token: tokenData.token, apiBase: saved.apiBase };
+    // 계정 정보 가져와서 retentionAt 업데이트
+    const info = await fetchAccountInfo(saved.apiBase, tokenData.token);
+    const retentionAt = computeRetentionAt(info) || saved.retentionAt || null;
+    const account = { address: saved.address, password: saved.password, token: tokenData.token, apiBase: saved.apiBase, retentionAt };
     currentEmail = account;
     emailDisplay.innerHTML = `<span>${escapeHtml(account.address)}</span>`;
     copyBtn.disabled = false;
@@ -88,6 +98,7 @@ async function restoreSession(saved) {
     knownIds.clear();
     fetchInbox();
     startAutoRefresh();
+    updateRetentionDisplay();
     return true;
   } catch { return false; }
 }
@@ -170,6 +181,26 @@ async function safeJson(res) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+// 계정 정보 조회 (retentionAt 포함)
+async function fetchAccountInfo(apiBase, token) {
+  try {
+    const res = await fetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${token}` } });
+    return await safeJson(res);
+  } catch { return null; }
+}
+
+// retention 날짜 계산 (응답에 없으면 createdAt + 7일로 추정)
+function computeRetentionAt(info) {
+  if (!info) return null;
+  if (info.retentionAt) return info.retentionAt;
+  if (info.createdAt) {
+    const d = new Date(info.createdAt);
+    d.setDate(d.getDate() + 7);
+    return d.toISOString();
+  }
+  return null;
+}
+
 // 계정 생성 및 토큰 발급
 async function createAccount(address) {
   const domain = address.split('@')[1];
@@ -186,6 +217,7 @@ async function createAccount(address) {
     const err = await safeJson(createRes);
     throw new Error(err?.['hydra:description'] || err?.detail || '계정 생성 실패');
   }
+  const createData = await safeJson(createRes);
 
   // 토큰 발급
   const tokenRes = await fetch(`${apiBase}/token`, {
@@ -198,7 +230,8 @@ async function createAccount(address) {
     throw new Error('토큰 발급 실패');
   }
 
-  return { address, password, token: tokenData.token, apiBase };
+  const retentionAt = computeRetentionAt(createData);
+  return { address, password, token: tokenData.token, apiBase, retentionAt };
 }
 
 // 랜덤 메일 생성
@@ -235,6 +268,33 @@ function setEmail(account) {
   fetchInbox();
   startAutoRefresh();
   saveSession();
+  updateRetentionDisplay();
+}
+
+// 남은 기간 표시
+function updateRetentionDisplay() {
+  const el = document.getElementById('retentionInfo');
+  if (!el) return;
+  if (!currentEmail || !currentEmail.retentionAt) {
+    el.textContent = '';
+    return;
+  }
+  const now = new Date();
+  const expiry = new Date(currentEmail.retentionAt);
+  const diff = expiry - now;
+  if (diff <= 0) {
+    el.innerHTML = '<span class="retention-expired">만료됨</span>';
+    return;
+  }
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  let remaining;
+  if (days > 0) remaining = `${days}일 ${hours}시간 남음`;
+  else if (hours > 0) remaining = `${hours}시간 ${minutes}분 남음`;
+  else remaining = `${minutes}분 남음`;
+  const expiryStr = expiry.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  el.innerHTML = `<span class="retention-label">삭제 예정:</span> <span class="retention-remaining">${remaining}</span> <span class="retention-date">(${expiryStr})</span>`;
 }
 
 // 클립보드 복사
@@ -409,6 +469,7 @@ function startAutoRefresh() {
       countdown = 5;
     }
     timerSpan.textContent = `${countdown}초 후 새로고침`;
+    updateRetentionDisplay();
   }, 1000);
 }
 

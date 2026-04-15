@@ -117,6 +117,37 @@ header h1 {
   font-size: 1rem;
 }
 
+.retention-info {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 16px;
+  min-height: 20px;
+}
+
+.retention-info:empty {
+  display: none;
+}
+
+.retention-label {
+  color: #64748b;
+}
+
+.retention-remaining {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.retention-date {
+  color: #475569;
+  font-size: 0.8rem;
+}
+
+.retention-expired {
+  color: #ef4444;
+  font-weight: 600;
+}
+
 .email-actions {
   display: flex;
   gap: 10px;
