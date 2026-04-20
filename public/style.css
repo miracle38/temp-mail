@@ -277,6 +277,13 @@ body {
   flex-wrap: wrap;
 }
 
+.custom-notice {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
 .custom-input-group input {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
