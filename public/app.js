@@ -1,8 +1,71 @@
+// 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
+const VERSION_HISTORY = [
+  {
+    version: '1.1.0',
+    date: '2026-05-14',
+    title: '메일 본문 링크 새 탭 열기',
+    added: [
+      '받은 메일 본문의 링크/버튼을 클릭하면 새 탭으로 열림 — iframe sandbox 에 allow-popups + allow-popups-to-escape-sandbox 추가하고 <base target="_blank"> 주입',
+      '하단 푸터에 버전 정보 표시 — 클릭하면 버전 이력 팝업이 열림 (다른 프로젝트와 동일 패턴)',
+    ],
+    changed: [
+      '스크립트/폼/same-origin 차단은 그대로 유지 (XSS 방어 유효)',
+    ],
+  },
+  {
+    version: '1.0.0',
+    date: '2026-04-15',
+    title: '초기 릴리즈',
+    added: [
+      'mail.tm / mail.gw 멀티 API 지원으로 일회용 임시 메일 주소 생성 및 수신',
+      '본문 프리페치 — mail.tm/gw 가 메시지 자동 정리해도 캐시본 보존',
+      'Firebase Auth + Realtime DB 로 메일 메타데이터 클라우드 동기화 (옵션)',
+      '메일 뷰어 ↑↓ 키 / 뒤로가기로 탐색, popstate 로 뷰어 닫기',
+    ],
+  },
+];
+
 // 멀티 API 지원 (mail.tm + mail.gw)
 const API_PROVIDERS = [
   { name: 'mail.tm', base: 'https://api.mail.tm' },
   { name: 'mail.gw', base: 'https://api.mail.gw' },
 ];
+
+// 버전 정보 모달
+function renderVersionBody() {
+  const body = document.getElementById('versionBody');
+  if (!body) return;
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const section = (label, items, cls) => {
+    if (!items || !items.length) return '';
+    return `<div class="version-section">
+        <span class="version-section-label ${cls}">${label}</span>
+        <ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+      </div>`;
+  };
+  body.innerHTML = VERSION_HISTORY.map((v, idx) => `
+    <div class="version-entry">
+      <div class="version-entry-head">
+        <span class="version-tag${idx === 0 ? ' current' : ''}">v${esc(v.version)}</span>
+        <span class="version-date">${esc(v.date)}</span>
+        ${v.title ? `<span class="version-title">${esc(v.title)}</span>` : ''}
+      </div>
+      ${v.note ? `<div class="version-note">${esc(v.note)}</div>` : ''}
+      ${section('추가', v.added, 'added')}
+      ${section('변경', v.changed, 'changed')}
+      ${section('수정', v.fixed, 'fixed')}
+    </div>
+  `).join('');
+}
+
+function openVersionModal() {
+  renderVersionBody();
+  document.getElementById('versionOverlay').classList.add('active');
+}
+
+function closeVersionModal() {
+  document.getElementById('versionOverlay').classList.remove('active');
+}
 
 // 상태
 let currentEmail = null;   // { address, password, token, apiBase }
@@ -1487,9 +1550,14 @@ async function readMessage(id, itemEl) {
     viewerBody.innerHTML = '';
     if (msg.html && msg.html.length > 0) {
       const iframe = document.createElement('iframe');
-      // sandbox=""로 모든 권한 차단: script 실행, form 제출, popup, top 이동 모두 금지
-      // (이미지/CSS는 정상 렌더링됨)
-      iframe.setAttribute('sandbox', '');
+      // sandbox: 스크립트/폼 실행은 여전히 차단하되 링크 클릭은 새 탭으로 허용
+      //   allow-popups: <a target="_blank"> 클릭으로 새 창/탭 열기 허용
+      //   allow-popups-to-escape-sandbox: 열린 새 탭은 sandbox 제약 없이 정상 페이지로 동작
+      //   (allow-scripts/allow-forms/allow-same-origin 은 일부러 빼서 XSS 방어 유지)
+      iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+      // <base target="_blank"> 로 본문 내 모든 <a> 링크가 기본적으로 새 탭에서 열림
+      // (modern 브라우저는 target="_blank" 에 자동으로 rel="noopener" 적용하여 opener 노출 방지)
+      const baseTag = '<base target="_blank">';
       // 강제 줄바꿈 스타일 주입 (긴 URL/테이블도 뷰어 폭을 넘지 않도록)
       const wrapStyle = `<style>
         html, body { max-width: 100% !important; overflow-x: hidden !important; box-sizing: border-box !important; margin: 0 !important; padding: 0 !important; word-wrap: break-word !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
@@ -1498,9 +1566,9 @@ async function readMessage(id, itemEl) {
         img, video, iframe, embed, object { max-width: 100% !important; height: auto !important; }
         pre, code { white-space: pre-wrap !important; word-wrap: break-word !important; overflow-x: auto !important; }
         table { max-width: 100% !important; display: block !important; overflow-x: auto !important; }
-        a { word-break: break-all !important; }
+        a { word-break: break-all !important; cursor: pointer !important; }
       </style>`;
-      iframe.srcdoc = wrapStyle + msg.html.join('');
+      iframe.srcdoc = baseTag + wrapStyle + msg.html.join('');
       iframe.className = 'mail-html-frame';
       viewerBody.appendChild(iframe);
     } else if (msg.text) {

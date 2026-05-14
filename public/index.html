@@ -7,7 +7,7 @@
   <meta name="referrer" content="no-referrer">
   <title>임시메일 - Disposable Email</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233b82f6'/><stop offset='1' stop-color='%236366f1'/></linearGradient></defs><rect width='64' height='64' rx='14' fill='url(%23g)'/><rect x='14' y='20' width='36' height='24' rx='3' fill='none' stroke='white' stroke-width='3.5' stroke-linejoin='round'/><path d='M14 22 L32 34 L50 22' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><circle cx='48' cy='18' r='6' fill='%23fbbf24' stroke='%230f172a' stroke-width='2'/></svg>">
-  <link rel="stylesheet" href="style.css?v=20260416a">
+  <link rel="stylesheet" href="style.css?v=20260514a">
 </head>
 <body>
   <header class="top-header">
@@ -124,12 +124,29 @@
   <!-- 알림 토스트 -->
   <div class="toast" id="toast"></div>
 
-  <footer class="site-footer">© 2026 KHS</footer>
+  <!-- 버전 정보 모달 -->
+  <div class="version-overlay" id="versionOverlay" onclick="if(event.target===this)closeVersionModal()">
+    <div class="version-box">
+      <div class="version-header">
+        <h2>📋 버전 정보</h2>
+        <button class="version-close" onclick="closeVersionModal()" aria-label="닫기">&times;</button>
+      </div>
+      <div class="version-body" id="versionBody"></div>
+      <div class="version-footer">
+        <a href="https://github.com/miracle38/temp-mail/releases" target="_blank" rel="noopener">GitHub Releases에서 전체 이력 보기 ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    © 2026 KHS · 임시메일 ·
+    <a href="javascript:void(0)" onclick="openVersionModal()" title="버전 정보 보기">v<span id="appVersionLabel">1.1.0</span></a>
+  </footer>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-  <script src="firebase-config.js?v=20260416a"></script>
-  <script src="app.js?v=20260416a"></script>
+  <script src="firebase-config.js?v=20260514a"></script>
+  <script src="app.js?v=20260514a"></script>
 </body>
 </html>
