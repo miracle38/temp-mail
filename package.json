@@ -1,6 +1,6 @@
 {
   "name": "temp-mail",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "일회용 임시 메일 생성 및 수신 프로그램",
   "main": "server.js",
   "scripts": {

@@ -961,14 +961,19 @@ body {
 /* 푸터 */
 .site-footer {
   border-top: 1px solid #e2e8f0;
-  padding: 14px 16px;
+  padding: 12px 16px 14px;
   color: #94a3b8;
   font-size: 0.78rem;
   text-align: center;
   letter-spacing: 0.3px;
   flex-shrink: 0;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+.site-footer .footer-info { color: #64748b; }
+.site-footer .footer-copyright { color: #94a3b8; font-size: 0.72rem; }
 
 /* 토스트 알림 */
 .toast {

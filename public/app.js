@@ -1,6 +1,17 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.1.1',
+    date: '2026-05-14',
+    title: '버전 팝업 동작 + 푸터 분리',
+    fixed: [
+      '버전 정보 링크 클릭 시 팝업이 안 뜨던 문제 — CSP 의 script-src 가 inline onclick 핸들러를 차단했음. addEventListener 로 바인딩하도록 변경 (close 버튼, overlay 외부 클릭 닫기 포함)',
+    ],
+    changed: [
+      '푸터를 두 줄로 분리: 위 "임시메일 · v1.1.1", 아래 "© 2026 KHS"',
+    ],
+  },
+  {
     version: '1.1.0',
     date: '2026-05-14',
     title: '메일 본문 링크 새 탭 열기',
@@ -785,6 +796,22 @@ function waitForAuthReady(timeoutMs = 4000) {
 async function init() {
   // 초기 스토리지 표시
   updateStorageDisplay();
+  // 버전 정보 모달 — CSP 가 inline onclick 을 막으므로 addEventListener 로 바인딩
+  const versionLinkBtn = document.getElementById('versionLinkBtn');
+  if (versionLinkBtn) {
+    versionLinkBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openVersionModal();
+    });
+  }
+  const versionCloseBtn = document.getElementById('versionCloseBtn');
+  if (versionCloseBtn) versionCloseBtn.addEventListener('click', closeVersionModal);
+  const versionOverlay = document.getElementById('versionOverlay');
+  if (versionOverlay) {
+    versionOverlay.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeVersionModal();
+    });
+  }
   // UI 이벤트는 가장 먼저 바인딩 (네트워크 오류와 무관하게 동작하도록)
   generateBtn.addEventListener('click', generateEmail);
   copyBtn.addEventListener('click', copyEmail);
