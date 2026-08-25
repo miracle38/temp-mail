@@ -1,6 +1,14 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.1.4',
+    date: '2026-08-25',
+    title: '로그인 상태에서 생성한 메일 주소가 사라지는 문제 수정',
+    fixed: [
+      '로그인(클라우드 동기화) 직후 클라우드 히스토리를 다 불러오기 전에 새 메일을 생성하면, 그 시점엔 히스토리가 비어있는 것처럼 보여서 기존에 저장돼 있던 다른 메일 주소들이 전부 사라지던 문제 — 클라우드 히스토리 로드가 끝나기 전에는 저장을 건너뛰도록 수정',
+    ],
+  },
+  {
     version: '1.1.3',
     date: '2026-08-25',
     title: '임시 메일 보관 개수 확대',
@@ -158,6 +166,10 @@ const cloudMem = {
 
 function isCloudMode() { return !!currentUser; }
 
+// 클라우드 히스토리 로드 완료 여부 - 로드 전에 새 메일을 만들면 getHistory()가 빈 배열을
+// 반환해 saveHistoryToStorage()가 기존 클라우드 히스토리를 통째로 덮어써버리는 것을 방지
+let cloudReady = true;
+
 // 로그인/로그아웃 전환 시 UI 초기화 헬퍼
 function resetSessionUI() {
   currentEmail = null;
@@ -202,6 +214,12 @@ function setMessageCache(address, cache) {
 // 히스토리: 로그인=메모리, 비로그인=localStorage
 function saveHistoryToStorage(arr) {
   if (isCloudMode()) {
+    // 클라우드 히스토리를 아직 한 번도 로드하지 못한 상태(null)에서 저장하면
+    // 기존에 클라우드에 저장돼 있던 다른 메일 주소들을 통째로 지워버리게 됨 - 저장 건너뜀
+    if (cloudMem.history === null) {
+      console.warn('[saveHistoryToStorage] 클라우드 히스토리 로드 전이라 저장을 건너뜀 (기존 데이터 덮어쓰기 방지)');
+      return;
+    }
     cloudMem.history = arr.slice();
     if (db && currentUser) {
       db.ref(`tempmail/${currentUser.uid}/history`).set(cloudMem.history).catch(err => {
@@ -272,8 +290,9 @@ async function loadAllFromCloud() {
   if (!currentUser || !db) return;
   try {
     const snap = await db.ref(`tempmail/${currentUser.uid}`).get();
-    if (!snap.exists()) return;
-    const data = snap.val() || {};
+    // 스냅샷이 없어도(완전히 새 계정) history 는 null 이 아닌 빈 배열로 확정해야
+    // saveHistoryToStorage()의 "로드 전" 판정(cloudMem.history === null)에 영원히 걸리지 않음
+    const data = snap.exists() ? (snap.val() || {}) : {};
     cloudMem.history = data.history || [];
     cloudMem.current = data.current || null;
     // messages는 address key가 인코딩되어 있음 → 디코딩
@@ -688,7 +707,10 @@ function handleAuthStateChange() {
       resetSessionUI();
       // 클라우드에서만 로드 (localStorage는 건드리지 않음 - 로그아웃 후 복귀용)
       cloudMem.reset();
+      // 로드가 끝나기 전에 새 메일을 생성하면 기존 히스토리를 덮어쓸 수 있어 그 사이엔 막아둠
+      cloudReady = false;
       await loadAllFromCloud();
+      cloudReady = true;
       // 클라우드의 현재 세션 복원
       if (cloudMem.current) {
         try { await restoreSession(cloudMem.current); } catch (e) { console.error(e); }
@@ -701,6 +723,7 @@ function handleAuthStateChange() {
       loginBtn.style.display = 'inline-block';
       userInfo.style.display = 'none';
       unsubscribeRemoteHistory();
+      cloudReady = true;
       if (wasLoggedIn) {
         // 클라우드 메모리 비우고 UI 초기화
         cloudMem.reset();
@@ -722,7 +745,9 @@ async function syncFromFirebase() {
   // 클라우드 모드에서만 동작 (로컬과 병합하지 않음)
   if (!isCloudMode()) return;
   cloudMem.reset();
+  cloudReady = false;
   await loadAllFromCloud();
+  cloudReady = true;
   renderHistory();
   // 현재 세션이 클라우드와 다르면 복원
   if (cloudMem.current && (!currentEmail || currentEmail.address !== cloudMem.current.address)) {
@@ -1020,6 +1045,10 @@ async function generateEmail() {
     showToast('도메인 목록을 불러오지 못했습니다. 네트워크를 확인 후 페이지를 새로고침 해주세요.', 'error');
     return;
   }
+  if (isCloudMode() && !cloudReady) {
+    showToast('클라우드 동기화 중입니다. 잠시 후 다시 시도해주세요.', 'error');
+    return;
+  }
   if (getHistory().length >= MAX_HISTORY) {
     showToast(`임시 메일 주소가 최대 ${MAX_HISTORY}개입니다. 사용하지 않는 항목을 삭제 후 다시 생성해주세요.`, 'error');
     return;
@@ -1109,6 +1138,10 @@ function toggleCustom() {
 async function applyCustom() {
   const login = customLogin.value.trim();
   const domain = domainSelect.value;
+  if (isCloudMode() && !cloudReady) {
+    showToast('클라우드 동기화 중입니다. 잠시 후 다시 시도해주세요.', 'error');
+    return;
+  }
   if (!login) {
     showToast('아이디를 입력해주세요', 'error');
     customLogin.focus();
