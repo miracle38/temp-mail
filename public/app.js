@@ -1,6 +1,14 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.1.5',
+    date: '2026-08-25',
+    title: '로그인 직후 동기화 대기 시간 단축',
+    fixed: [
+      '바로 전 버전(1.1.4)에서 데이터 유실 방지를 위해 클라우드 로드가 끝날 때까지 "새 메일 생성"을 막았는데, 그 로드가 저장된 메일 본문 캐시까지 전부 포함하고 있어 메일이 많이 쌓인 계정에서는 대기 시간이 길게 느껴지던 문제 — 주소 목록(히스토리)만 먼저 빠르게 불러와 즉시 잠금을 풀고, 용량이 큰 메일 본문 캐시/현재 세션은 뒤이어 백그라운드로 불러오도록 분리',
+    ],
+  },
+  {
     version: '1.1.4',
     date: '2026-08-25',
     title: '로그인 상태에서 생성한 메일 주소가 사라지는 문제 수정',
@@ -284,27 +292,41 @@ function syncMailCacheToFirebase(address) {
   }, 2000);
 }
 
-// Firebase에서 메일 캐시 불러오기 (로컬에 병합)
-// 클라우드 로그인 시 전체 데이터를 메모리로 로드
-async function loadAllFromCloud() {
+// Firebase에서 히스토리만 먼저 로드 - 주소 목록/메타데이터뿐이라 작고 빠름.
+// 새 메일 생성 등을 막아두는 cloudReady 게이트는 이것만 끝나면 바로 풀어줌.
+async function loadHistoryFromCloud() {
   if (!currentUser || !db) return;
   try {
-    const snap = await db.ref(`tempmail/${currentUser.uid}`).get();
+    const snap = await db.ref(`tempmail/${currentUser.uid}/history`).get();
     // 스냅샷이 없어도(완전히 새 계정) history 는 null 이 아닌 빈 배열로 확정해야
     // saveHistoryToStorage()의 "로드 전" 판정(cloudMem.history === null)에 영원히 걸리지 않음
-    const data = snap.exists() ? (snap.val() || {}) : {};
-    cloudMem.history = data.history || [];
-    cloudMem.current = data.current || null;
+    cloudMem.history = snap.exists() ? (snap.val() || []) : [];
+  } catch (err) {
+    console.error('클라우드 히스토리 로드 실패', err);
+  }
+}
+
+// Firebase에서 현재 세션 + 메일 본문 캐시 로드 - 저장된 메일이 많으면 용량이 커서
+// 히스토리보다 오래 걸릴 수 있음. cloudReady 게이트와 무관하게 백그라운드로 처리.
+async function loadRestFromCloud() {
+  if (!currentUser || !db) return;
+  try {
+    const [currentSnap, messagesSnap] = await Promise.all([
+      db.ref(`tempmail/${currentUser.uid}/current`).get(),
+      db.ref(`tempmail/${currentUser.uid}/messages`).get(),
+    ]);
+    cloudMem.current = currentSnap.exists() ? (currentSnap.val() || null) : null;
     // messages는 address key가 인코딩되어 있음 → 디코딩
     cloudMem.messages = {};
-    if (data.messages) {
-      Object.keys(data.messages).forEach(k => {
+    if (messagesSnap.exists()) {
+      const data = messagesSnap.val() || {};
+      Object.keys(data).forEach(k => {
         const addr = k.replace(/_dot_/g, '.').replace(/_at_/g, '@');
-        cloudMem.messages[addr] = data.messages[k];
+        cloudMem.messages[addr] = data[k];
       });
     }
   } catch (err) {
-    console.error('클라우드 전체 로드 실패', err);
+    console.error('클라우드 나머지 데이터 로드 실패', err);
   }
 }
 
@@ -707,10 +729,14 @@ function handleAuthStateChange() {
       resetSessionUI();
       // 클라우드에서만 로드 (localStorage는 건드리지 않음 - 로그아웃 후 복귀용)
       cloudMem.reset();
-      // 로드가 끝나기 전에 새 메일을 생성하면 기존 히스토리를 덮어쓸 수 있어 그 사이엔 막아둠
+      // 로드가 끝나기 전에 새 메일을 생성하면 기존 히스토리를 덮어쓸 수 있어 그 사이엔 막아둠.
+      // 히스토리(주소 목록)만 먼저 로드해서 바로 풀어주고, 용량이 클 수 있는 메일 본문
+      // 캐시/현재 세션은 뒤이어 로드 - "새 메일 생성"이 그것까지 기다릴 필요는 없음.
       cloudReady = false;
-      await loadAllFromCloud();
+      await loadHistoryFromCloud();
       cloudReady = true;
+      renderHistory();
+      await loadRestFromCloud();
       // 클라우드의 현재 세션 복원
       if (cloudMem.current) {
         try { await restoreSession(cloudMem.current); } catch (e) { console.error(e); }
@@ -746,9 +772,10 @@ async function syncFromFirebase() {
   if (!isCloudMode()) return;
   cloudMem.reset();
   cloudReady = false;
-  await loadAllFromCloud();
+  await loadHistoryFromCloud();
   cloudReady = true;
   renderHistory();
+  await loadRestFromCloud();
   // 현재 세션이 클라우드와 다르면 복원
   if (cloudMem.current && (!currentEmail || currentEmail.address !== cloudMem.current.address)) {
     try { await restoreSession(cloudMem.current); } catch (e) { console.error(e); }
