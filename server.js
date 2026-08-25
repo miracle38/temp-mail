@@ -22,6 +22,7 @@ async function fetchApi(url, options = {}) {
   try {
     return { status: res.status, data: JSON.parse(text) };
   } catch {
+    console.error(`[fetchApi] non-JSON response from ${url}, status=${res.status}:`, text.slice(0, 300));
     return { status: res.status, data: text };
   }
 }
@@ -33,6 +34,7 @@ app.get('/api/domains', async (req, res) => {
     const domains = result.data['hydra:member'].map(d => d.domain);
     res.json(domains);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: '도메인 목록을 가져올 수 없습니다.' });
   }
 });
@@ -50,6 +52,7 @@ app.post('/api/accounts', async (req, res) => {
     }
     res.json(result.data);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: '계정을 생성할 수 없습니다.' });
   }
 });
@@ -67,6 +70,7 @@ app.post('/api/token', async (req, res) => {
     }
     res.json(result.data);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: '토큰을 발급할 수 없습니다.' });
   }
 });
@@ -87,6 +91,7 @@ app.get('/api/messages', async (req, res) => {
     const messages = result.data['hydra:member'] || [];
     res.json(messages);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: '메일 목록을 가져올 수 없습니다.' });
   }
 });
@@ -106,10 +111,16 @@ app.get('/api/messages/:id', async (req, res) => {
     }
     res.json(result.data);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: '메일을 읽을 수 없습니다.' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`임시메일 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
-});
+// 로컬 실행 시에만 서버를 띄움 (Vercel에서는 require로 app만 가져다 서버리스 함수로 감쌈)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`임시메일 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+  });
+}
+
+module.exports = app;
