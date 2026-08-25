@@ -1,6 +1,14 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.1.3',
+    date: '2026-08-25',
+    title: '임시 메일 보관 개수 확대',
+    changed: [
+      '보관 가능한 임시 메일 주소 최대 개수 10개→20개로 확대',
+    ],
+  },
+  {
     version: '1.1.2',
     date: '2026-08-25',
     title: '메일 본문 뷰어 확대',
@@ -133,7 +141,7 @@ const HISTORY_KEY = 'tempmail_history';
 const MSG_CACHE_PREFIX = 'tempmail_msgs_';
 
 // 이전 메일 주소 보관 최대 개수
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 20;
 
 // Firebase 키 안전화 (`.`, `@` 등 금지 문자 변환)
 function addressToKey(addr) {
