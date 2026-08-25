@@ -1,6 +1,18 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.1.2',
+    date: '2026-08-25',
+    title: '메일 본문 뷰어 확대',
+    fixed: [
+      '메일 본문이 좁은 박스 안에 갇혀 스크롤바가 생기던 문제 — 메일을 읽는 동안은 내부 스크롤 대신 페이지 전체 스크롤을 쓰도록 변경해 본문을 한 화면에 더 크게 볼 수 있음',
+    ],
+    changed: [
+      '뷰어 본문 글자 크기/줄간격 확대 (0.9rem→1rem, line-height 1.65→1.7)',
+      'HTML 메일 iframe 최소 높이 800px→1200px로 확대',
+    ],
+  },
+  {
     version: '1.1.1',
     date: '2026-05-14',
     title: '버전 팝업 동작 + 푸터 분리',
@@ -1631,6 +1643,8 @@ async function readMessage(id, itemEl) {
     const wasHidden = viewerSection.style.display === 'none' || viewerSection.style.display === '';
     inbox.style.display = 'none';
     viewerSection.style.display = 'flex';
+    // 뷰어가 열려있는 동안은 내부 스크롤 대신 페이지 전체 스크롤을 사용해 본문을 더 크게 보여줌
+    document.documentElement.classList.add('viewing-mail');
     updateMailNavigation();
     // 뷰어가 처음 열릴 때만 히스토리 상태 푸시 (마우스 뒤로가기/브라우저 뒤로가기로 목록 복귀 가능)
     // 메일 간 네비게이션(↑↓)에서는 이미 푸시된 상태를 유지
@@ -1655,6 +1669,7 @@ function pushViewerHistory() {
 // - 버튼/키보드로 닫을 때: history.back()으로 푸시한 상태 되돌림 → popstate가 실제 UI 변경
 // - 마우스 뒤로가기/브라우저 뒤로가기로 닫을 때: popstate → 이 함수 직접 호출
 function closeViewer() {
+  document.documentElement.classList.remove('viewing-mail');
   // 이미 popstate로 진입한 경우는 바로 UI만 닫고 종료
   if (_closingViaPopstate) {
     viewerSection.style.display = 'none';
@@ -1807,6 +1822,7 @@ function clearInbox() {
   mailCount.textContent = '0';
   viewerSection.style.display = 'none';
   inbox.style.display = 'block';
+  document.documentElement.classList.remove('viewing-mail');
   // 세션 전환/초기화 시 푸시된 뷰어 히스토리도 정리
   if (_viewerHistoryPushed) {
     _viewerHistoryPushed = false;

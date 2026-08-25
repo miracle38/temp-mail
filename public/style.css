@@ -117,6 +117,23 @@ body {
   body { height: 100vh; }
 }
 
+/* 메일을 읽는 동안은 좁은 박스 안 내부 스크롤 대신 페이지 전체 스크롤을 사용해 본문을 크게 표시 */
+html.viewing-mail,
+html.viewing-mail body {
+  overflow: visible !important;
+  height: auto !important;
+}
+
+html.viewing-mail .layout,
+html.viewing-mail .main-panel,
+html.viewing-mail .inbox-wrapper,
+html.viewing-mail .viewer-section,
+html.viewing-mail .viewer-body {
+  overflow: visible !important;
+  min-height: 0 !important;
+  flex: none !important;
+}
+
 /* 공통 섹션 */
 .email-section,
 .history-section,
@@ -787,9 +804,9 @@ body {
   color: #1e293b;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 16px 18px;
-  font-size: 0.9rem;
-  line-height: 1.65;
+  padding: 18px 20px;
+  font-size: 1rem;
+  line-height: 1.7;
   overflow-y: auto;
   overflow-x: hidden;
   word-break: break-word;
@@ -808,7 +825,7 @@ body {
 
 .mail-html-frame {
   width: 100%;
-  min-height: 800px;
+  min-height: 1200px;
   border: none;
   background: #ffffff;
 }
