@@ -8,6 +8,10 @@ const VERSION_HISTORY = [
     fixed: [
       '도메인 목록을 못 불러와 새 메일 주소가 생성되지 않던 문제',
     ],
+    added: [
+      '예비 서비스 자동 전환 — Guerrilla Mail이 장애(접속 불가·서버 오류·요청 제한)로 주소를 못 만들면 같은 아이디로 maildrop.cc 주소를 대신 생성 (Maildrop 메일은 24시간 보관)',
+      '도메인 목록에 maildrop.cc 추가 — 직접 골라서 사용할 수도 있음',
+    ],
     changed: [
       '도메인: sharklasers.com, grr.la, guerrillamail.com 등 11개 (어느 도메인으로 받아도 같은 아이디의 받은편지함으로 수신)',
       '받은 메일은 Guerrilla Mail 서버에서 1시간 후 자동 삭제 — 앱이 미리 받아둔 본문 캐시는 계속 볼 수 있음',
@@ -101,8 +105,12 @@ const GUERRILLA_DOMAINS = [
   'guerrillamail.biz', 'guerrillamail.info', 'guerrillamail.de', 'guerrillamailblock.com',
   'pokemail.net', 'spam4.me',
 ];
+// 예비: Maildrop (Guerrilla 장애 시 자동 전환). 비밀번호 없는 공개 받은편지함, 메일 24시간 보관
+const MAILDROP_BASE = 'https://api.maildrop.cc';
+const MAILDROP_DOMAIN = 'maildrop.cc';
 const API_PROVIDERS = [
   { name: 'guerrillamail', base: GUERRILLA_BASE },
+  { name: 'maildrop', base: MAILDROP_BASE },
 ];
 
 const gmSessions = new Map(); // sid_token → 아이디(소문자). 세션이 다른 주소로 바뀌었는지 검증용
@@ -150,8 +158,74 @@ function isGmWelcome(m) {
   return m.mail_from === 'no-reply@guerrillamail.com' && /^Welcome to Guerrilla Mail/.test(m.mail_subject || '');
 }
 
-// mail.tm 형식 요청 → Guerrilla Mail 호출. Guerrilla 외 주소(예전 mail.tm 항목)는 그대로 fetch.
+async function mdQuery(query, variables) {
+  const res = await fetch(`${MAILDROP_BASE}/graphql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) throw Object.assign(new Error(`maildrop ${res.status}`), { status: res.status });
+  const json = await res.json();
+  if (json.errors?.length) throw new Error(json.errors[0].message);
+  return json.data;
+}
+
+function mdToMessage(m) {
+  return {
+    id: m.id,
+    from: { address: m.headerfrom || '', name: '' },
+    subject: m.subject || '',
+    createdAt: m.date,
+  };
+}
+
+// mail.tm 형식 요청 → Maildrop GraphQL 호출. 토큰 = 메일함 이름(인증 없음)
+async function maildropFetch(url, options = {}) {
+  const u = new URL(url);
+  const path = u.pathname;
+  const method = (options.method || 'GET').toUpperCase();
+  const mailbox = (options.headers?.Authorization || '').replace(/^Bearer\s+/, '');
+  const body = options.body ? JSON.parse(options.body) : {};
+
+  if (path === '/domains') return jsonResponse({ 'hydra:member': [{ domain: MAILDROP_DOMAIN }] });
+  if (method === 'POST' && (path === '/accounts' || path === '/token')) {
+    try {
+      const data = await mdQuery('query { status }');
+      if (data.status !== 'operational') return jsonResponse({ detail: 'maildrop unavailable' }, 503);
+      const token = (body.address || '').split('@')[0].toLowerCase();
+      return jsonResponse(path === '/token' ? { token } : { address: body.address }, path === '/token' ? 200 : 201);
+    } catch (err) {
+      return jsonResponse({ detail: err.message }, err.status === 429 ? 429 : 503);
+    }
+  }
+  if (!mailbox) return jsonResponse({ detail: 'unauthorized' }, 401);
+  if (path === '/me') return jsonResponse({});
+  if (path === '/messages') {
+    if (Number(u.searchParams.get('page') || 1) > 1) return jsonResponse({ 'hydra:member': [] });
+    const data = await mdQuery('query($m: String!) { inbox(mailbox: $m) { id headerfrom subject date } }', { m: mailbox });
+    return jsonResponse({ 'hydra:member': (data.inbox || []).map(mdToMessage) });
+  }
+  const idMatch = /^\/messages\/([^/]+)$/.exec(path);
+  if (idMatch) {
+    const id = idMatch[1];
+    if (method === 'DELETE') {
+      await mdQuery('mutation($m: String!, $id: String!) { delete(mailbox: $m, id: $id) }', { m: mailbox, id });
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'PATCH') return jsonResponse({});
+    const data = await mdQuery(
+      'query($m: String!, $id: String!) { message(mailbox: $m, id: $id) { id headerfrom subject date html } }',
+      { m: mailbox, id }
+    );
+    if (!data.message) return jsonResponse({ detail: 'not found' }, 404);
+    return jsonResponse({ ...mdToMessage(data.message), html: [data.message.html || ''], attachments: [] });
+  }
+  return jsonResponse({ detail: 'not found' }, 404);
+}
+
+// mail.tm 형식 요청 → Guerrilla Mail / Maildrop 호출. 그 외 주소(예전 mail.tm 항목)는 그대로 fetch.
 async function mailFetch(url, options = {}) {
+  if (url.startsWith(MAILDROP_BASE)) return maildropFetch(url, options);
   if (!url.startsWith(GUERRILLA_BASE)) return fetch(url, options);
   const u = new URL(url);
   const path = u.pathname;
@@ -168,7 +242,9 @@ async function mailFetch(url, options = {}) {
       const token = await gmOpen(body.address);
       return jsonResponse(path === '/token' ? { token } : { address: body.address }, path === '/token' ? 200 : 201);
     } catch (err) {
-      return jsonResponse({ detail: err.message }, err.status === 429 ? 429 : 422);
+      // 422 = 아이디 문제(사용자 입력), 그 외(네트워크·5xx·429)는 서비스 장애 → 예비 서비스 전환 대상
+      const status = err.message === 'invalid email' ? 422 : err.status === 429 ? 429 : 503;
+      return jsonResponse({ detail: err.message }, status);
     }
   }
   if (!sid) return jsonResponse({ detail: 'unauthorized' }, 401);
@@ -1171,7 +1247,7 @@ async function createAccount(address) {
   });
   if (!createRes.ok) {
     const err = await safeJson(createRes);
-    throw new Error(err?.['hydra:description'] || err?.detail || '계정 생성 실패');
+    throw Object.assign(new Error(err?.['hydra:description'] || err?.detail || '계정 생성 실패'), { status: createRes.status });
   }
   const createData = await safeJson(createRes);
 
@@ -1183,12 +1259,28 @@ async function createAccount(address) {
   });
   const tokenData = await safeJson(tokenRes);
   if (!tokenRes.ok || !tokenData?.token) {
-    throw new Error('토큰 발급 실패');
+    throw Object.assign(new Error('토큰 발급 실패'), { status: tokenRes.status });
   }
 
   const retentionAt = computeRetentionAt(createData);
   return { address, password, token: tokenData.token, apiBase, retentionAt };
 }
+
+// Guerrilla Mail 장애(네트워크 오류·5xx·요청 제한)로 생성이 실패하면 같은 아이디로 Maildrop 주소를 대신 만든다.
+// 아이디 형식 문제(422 등)는 전환하지 않고 그대로 에러. 반환: { account, fellBack }
+async function createAccountWithFallback(address) {
+  try {
+    return { account: await createAccount(address), fellBack: false };
+  } catch (err) {
+    const isOutage = err instanceof TypeError || !err.status || err.status === 429 || err.status >= 500;
+    if (getApiBase(address.split('@')[1]) !== GUERRILLA_BASE || !isOutage) throw err;
+    console.warn('Guerrilla Mail 생성 실패 → Maildrop으로 전환', err);
+    const fallback = `${address.split('@')[0].toLowerCase()}@${MAILDROP_DOMAIN}`;
+    return { account: await createAccount(fallback), fellBack: true };
+  }
+}
+
+const FALLBACK_NOTICE = 'Guerrilla Mail 장애로 예비 서비스(maildrop.cc) 주소로 생성했습니다';
 
 // 랜덤 메일 생성
 async function generateEmail() {
@@ -1207,12 +1299,15 @@ async function generateEmail() {
   generateBtn.disabled = true;
   generateBtn.innerHTML = '<span class="loading"></span>생성 중...';
   try {
-    const entry = domains[Math.floor(Math.random() * domains.length)];
+    // 랜덤 생성은 기본 서비스(Guerrilla) 도메인 중에서 고름. 실패 시 Maildrop으로 자동 전환
+    const primary = domains.filter(d => d.apiBase === GUERRILLA_BASE);
+    const pool = primary.length ? primary : domains;
+    const entry = pool[Math.floor(Math.random() * pool.length)];
     const login = randomString(10);
     const address = `${login}@${entry.domain}`;
-    const account = await createAccount(address);
+    const { account, fellBack } = await createAccountWithFallback(address);
     setEmail(account);
-    showToast('새 임시 메일이 생성되었습니다', 'success');
+    showToast(fellBack ? FALLBACK_NOTICE : '새 임시 메일이 생성되었습니다', fellBack ? 'info' : 'success');
   } catch (err) {
     showToast(mailApiErrorMessage(err), 'error');
   } finally {
@@ -1324,11 +1419,11 @@ async function applyCustom() {
   customApplyBtn.textContent = '생성 중...';
   try {
     const address = `${login}@${domain}`;
-    const account = await createAccount(address);
+    const { account, fellBack } = await createAccountWithFallback(address);
     setEmail(account);
     customSection.style.display = 'none';
     customLogin.value = '';
-    showToast('커스텀 메일 주소가 설정되었습니다', 'success');
+    showToast(fellBack ? FALLBACK_NOTICE : '커스텀 메일 주소가 설정되었습니다', fellBack ? 'info' : 'success');
   } catch (err) {
     showToast(mailApiErrorMessage(err), 'error');
   } finally {
