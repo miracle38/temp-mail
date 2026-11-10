@@ -5,31 +5,6 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
-
-// 메일 API 범용 프록시 (/api/mt/* → api.mail.tm, /api/gw/* → api.mail.gw)
-// mail.tm이 자사 도메인 외 Origin에는 CORS 헤더를 주지 않아 브라우저 직접 호출이 막히므로 서버에서 대신 호출.
-// 첨부파일(바이너리)까지 그대로 전달하려고 express.json 보다 먼저, raw body로 받는다.
-const PROXY_TARGETS = { mt: 'https://api.mail.tm', gw: 'https://api.mail.gw' };
-app.all('/api/:provider(mt|gw)/*', express.raw({ type: '*/*', limit: '5mb' }), async (req, res) => {
-  const target = PROXY_TARGETS[req.params.provider] + req.originalUrl.replace(/^\/api\/(mt|gw)/, '');
-  try {
-    const headers = {};
-    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
-    const hasBody = !['GET', 'HEAD'].includes(req.method) && req.body && req.body.length;
-    const upstream = await fetch(target, { method: req.method, headers, body: hasBody ? req.body : undefined });
-    res.status(upstream.status);
-    for (const h of ['content-type', 'content-disposition', 'retry-after']) {
-      const v = upstream.headers.get(h);
-      if (v) res.set(h, v);
-    }
-    res.send(Buffer.from(await upstream.arrayBuffer()));
-  } catch (err) {
-    console.error(`[proxy] ${req.method} ${target}`, err);
-    res.status(502).json({ error: '메일 서버에 연결할 수 없습니다.' });
-  }
-});
-
 app.use(express.json());
 
 const API_BASE = 'https://api.mail.tm';

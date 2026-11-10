@@ -3,13 +3,18 @@ const VERSION_HISTORY = [
   {
     version: '1.2.0',
     date: '2026-11-10',
-    title: '메일 주소 생성 불가 문제 수정',
+    title: '메일 서비스를 Guerrilla Mail로 교체',
+    note: 'mail.tm이 외부 사이트·클라우드 서버의 접근을 모두 막고 mail.gw는 서버가 중단되어, 공개 API를 제공하는 Guerrilla Mail로 교체했습니다.',
     fixed: [
-      'mail.tm이 외부 사이트에서의 브라우저 직접 호출(CORS)을 막으면서 도메인 목록을 못 불러와 새 메일 주소가 생성되지 않던 문제 — 모든 메일 API 호출을 앱 서버 프록시(/api/mt)를 거치도록 변경',
-      '서버가 중단된 mail.gw를 도메인 목록에서 제외',
+      '도메인 목록을 못 불러와 새 메일 주소가 생성되지 않던 문제',
     ],
     changed: [
-      'mail.tm 요청 제한(분당 약 10회)에 맞춰 자동 새로고침 간격을 5초 → 10초로 변경',
+      '도메인: sharklasers.com, grr.la, guerrillamail.com 등 11개 (어느 도메인으로 받아도 같은 아이디의 받은편지함으로 수신)',
+      '받은 메일은 Guerrilla Mail 서버에서 1시간 후 자동 삭제 — 앱이 미리 받아둔 본문 캐시는 계속 볼 수 있음',
+      '주소는 만료되지 않고 같은 아이디로 언제든 다시 열 수 있음 (비밀번호가 없어 아이디를 아는 사람은 누구나 같은 받은편지함을 볼 수 있음)',
+      '첨부파일 다운로드는 지원하지 않음',
+      '자동 새로고침 간격 5초 → 10초',
+      '예전 mail.tm 주소는 더 이상 새 메일을 받을 수 없음 (저장된 캐시본만 열람 가능)',
     ],
   },
   {
@@ -84,16 +89,115 @@ const VERSION_HISTORY = [
   },
 ];
 
-// 메일 API (mail.tm). mail.gw는 서버 중단으로 목록에서 제외(기존에 저장된 mail.gw 주소는 프록시 매핑만 유지)
+// 메일 API: Guerrilla Mail.
+// mail.tm은 외부 사이트의 브라우저 호출(CORS)과 클라우드 서버 IP를 모두 차단, mail.gw는 서버 중단(2026-11).
+// 앱의 나머지 코드는 mail.tm 형식(/accounts, /token, /messages ...)으로 짜여 있어서,
+// mailFetch()가 그 요청을 Guerrilla Mail API 호출로 번역해 mail.tm 형식의 Response로 돌려준다.
+const GUERRILLA_BASE = 'https://api.guerrillamail.com';
+const GUERRILLA_API = `${GUERRILLA_BASE}/ajax.php`;
+// 어느 도메인으로 받아도 같은 아이디의 받은편지함으로 들어옴
+const GUERRILLA_DOMAINS = [
+  'sharklasers.com', 'grr.la', 'guerrillamail.com', 'guerrillamail.net', 'guerrillamail.org',
+  'guerrillamail.biz', 'guerrillamail.info', 'guerrillamail.de', 'guerrillamailblock.com',
+  'pokemail.net', 'spam4.me',
+];
 const API_PROVIDERS = [
-  { name: 'mail.tm', base: 'https://api.mail.tm' },
+  { name: 'guerrillamail', base: GUERRILLA_BASE },
 ];
 
-// mail.tm이 외부 Origin의 브라우저 호출(CORS)을 막아서, 실제 요청은 우리 서버 프록시(/api/mt, /api/gw)로 보낸다.
-// 저장되는 apiBase는 원래 주소 그대로 두고(기존 히스토리 호환), 호출 직전에만 변환.
-const PROXY_MAP = { 'https://api.mail.tm': '/api/mt', 'https://api.mail.gw': '/api/gw' };
-function proxyBase(base) {
-  return PROXY_MAP[base] || base;
+const gmSessions = new Map(); // sid_token → 아이디(소문자). 세션이 다른 주소로 바뀌었는지 검증용
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+// HTML 엔티티(&#039; 등) 디코딩
+function decodeEntities(s) {
+  const ta = document.createElement('textarea');
+  ta.innerHTML = s || '';
+  return ta.value;
+}
+
+async function gmCall(params) {
+  const res = await fetch(`${GUERRILLA_API}?${new URLSearchParams({ lang: 'en', ...params })}`);
+  if (!res.ok) throw Object.assign(new Error(`guerrilla ${res.status}`), { status: res.status });
+  return res.json();
+}
+
+// 주소의 아이디로 받은편지함 세션을 연다(생성/재접속 동일). 반환: sid_token
+async function gmOpen(address) {
+  const login = (address || '').split('@')[0];
+  const data = await gmCall({ f: 'set_email_user', email_user: login });
+  const got = (data.email_addr || '').split('@')[0].toLowerCase();
+  if (!data.sid_token || got !== login.toLowerCase()) throw new Error('invalid email');
+  gmSessions.set(data.sid_token, got);
+  return data.sid_token;
+}
+
+function gmToMessage(m) {
+  return {
+    id: String(m.mail_id),
+    from: { address: m.mail_from || '', name: '' },
+    subject: decodeEntities(m.mail_subject),
+    intro: decodeEntities(m.mail_excerpt),
+    createdAt: new Date(Number(m.mail_timestamp) * 1000).toISOString(),
+    hasAttachments: Number(m.att) > 0,
+  };
+}
+
+// 가입 시 자동으로 들어오는 안내 메일은 숨김
+function isGmWelcome(m) {
+  return m.mail_from === 'no-reply@guerrillamail.com' && /^Welcome to Guerrilla Mail/.test(m.mail_subject || '');
+}
+
+// mail.tm 형식 요청 → Guerrilla Mail 호출. Guerrilla 외 주소(예전 mail.tm 항목)는 그대로 fetch.
+async function mailFetch(url, options = {}) {
+  if (!url.startsWith(GUERRILLA_BASE)) return fetch(url, options);
+  const u = new URL(url);
+  const path = u.pathname;
+  const method = (options.method || 'GET').toUpperCase();
+  const auth = options.headers?.Authorization || '';
+  const sid = auth.replace(/^Bearer\s+/, '');
+  const body = options.body ? JSON.parse(options.body) : {};
+
+  if (path === '/domains') {
+    return jsonResponse({ 'hydra:member': GUERRILLA_DOMAINS.map(domain => ({ domain })) });
+  }
+  if (method === 'POST' && (path === '/accounts' || path === '/token')) {
+    try {
+      const token = await gmOpen(body.address);
+      return jsonResponse(path === '/token' ? { token } : { address: body.address }, path === '/token' ? 200 : 201);
+    } catch (err) {
+      return jsonResponse({ detail: err.message }, err.status === 429 ? 429 : 422);
+    }
+  }
+  if (!sid) return jsonResponse({ detail: 'unauthorized' }, 401);
+  if (path === '/me') return jsonResponse({}); // 주소 자체는 만료 없음(같은 아이디로 언제든 재접속)
+
+  if (path === '/messages') {
+    if (Number(u.searchParams.get('page') || 1) > 1) return jsonResponse({ 'hydra:member': [] });
+    const data = await gmCall({ f: 'get_email_list', offset: 0, sid_token: sid });
+    // 만료·무효 세션이면 list가 없거나 다른 주소로 바뀌어 있음 → 401로 재발급 유도
+    const owner = gmSessions.get(sid);
+    if (!Array.isArray(data.list) || (owner && (data.email || '').split('@')[0].toLowerCase() !== owner)) {
+      return jsonResponse({ detail: 'session expired' }, 401);
+    }
+    return jsonResponse({ 'hydra:member': data.list.filter(m => !isGmWelcome(m)).map(gmToMessage) });
+  }
+
+  const idMatch = /^\/messages\/([^/]+)$/.exec(path);
+  if (idMatch) {
+    const id = idMatch[1];
+    if (method === 'DELETE') {
+      await gmCall({ f: 'del_email', 'email_ids[]': id, sid_token: sid });
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'PATCH') return jsonResponse({}); // 본문을 열람(fetch_email)하면 서버에서 자동 읽음 처리
+    const m = await gmCall({ f: 'fetch_email', email_id: id, sid_token: sid });
+    if (!m || !m.mail_id) return jsonResponse({ detail: 'not found' }, 404);
+    return jsonResponse({ ...gmToMessage(m), html: [m.mail_body || ''], attachments: [] });
+  }
+  return jsonResponse({ detail: 'not found' }, 404);
 }
 
 // 버전 정보 모달
@@ -135,7 +239,7 @@ function closeVersionModal() {
 // 상태
 let currentEmail = null;   // { address, password, token, apiBase }
 let refreshTimer = null;
-// mail.tm 요청 제한(IP당 분당 약 10회)에 걸리지 않도록 10초 간격
+// 메일 API 요청 부담을 줄이려 10초 간격
 const AUTO_REFRESH_SEC = 10;
 let countdown = AUTO_REFRESH_SEC;
 let domains = [];          // { domain, apiBase }[]
@@ -389,7 +493,7 @@ async function refreshAllAddresses() {
     if (isExpired(h.retentionAt)) continue;
     try {
       // 토큰 발급
-      const tokenRes = await fetch(`${proxyBase(h.apiBase)}/token`, {
+      const tokenRes = await mailFetch(`${h.apiBase}/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: h.address, password: h.password }),
@@ -403,7 +507,7 @@ async function refreshAllAddresses() {
       const MAX_PAGES = 20;
       let fullSweep = false;
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const res = await fetch(`${proxyBase(h.apiBase)}/messages?page=${page}`, {
+        const res = await mailFetch(`${h.apiBase}/messages?page=${page}`, {
           headers: { Authorization: `Bearer ${tokenData.token}` },
         });
         if (!res.ok) break; // 부분 스윕: fullSweep 유지 (false)
@@ -622,7 +726,7 @@ async function restoreSession(saved) {
     // 이전 세션의 자동 새로고침 즉시 중단 (이전 계정 데이터로 덮어쓰기 방지)
     stopAutoRefresh();
 
-    const tokenRes = await fetch(`${proxyBase(saved.apiBase)}/token`, {
+    const tokenRes = await mailFetch(`${saved.apiBase}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address: saved.address, password: saved.password }),
@@ -984,7 +1088,7 @@ async function loadDomains() {
   domains = [];
   const results = await Promise.allSettled(
     API_PROVIDERS.map(async (provider) => {
-      const res = await fetch(`${proxyBase(provider.base)}/domains`);
+      const res = await mailFetch(`${provider.base}/domains`);
       const data = await res.json();
       return (data['hydra:member'] || []).map(d => ({
         domain: d.domain,
@@ -1036,7 +1140,7 @@ async function safeJson(res) {
 // 계정 정보 조회 (retentionAt 포함)
 async function fetchAccountInfo(apiBase, token) {
   try {
-    const res = await fetch(`${proxyBase(apiBase)}/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await mailFetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${token}` } });
     return await safeJson(res);
   } catch { return null; }
 }
@@ -1060,7 +1164,7 @@ async function createAccount(address) {
   const password = randomString(16);
 
   // 계정 생성
-  const createRes = await fetch(`${proxyBase(apiBase)}/accounts`, {
+  const createRes = await mailFetch(`${apiBase}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -1072,7 +1176,7 @@ async function createAccount(address) {
   const createData = await safeJson(createRes);
 
   // 토큰 발급
-  const tokenRes = await fetch(`${proxyBase(apiBase)}/token`, {
+  const tokenRes = await mailFetch(`${apiBase}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -1237,7 +1341,7 @@ async function applyCustom() {
 async function refreshToken() {
   if (!currentEmail) return false;
   try {
-    const res = await fetch(`${proxyBase(currentEmail.apiBase)}/token`, {
+    const res = await mailFetch(`${currentEmail.apiBase}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address: currentEmail.address, password: currentEmail.password }),
@@ -1255,7 +1359,7 @@ async function apiFetch(url, options = {}, { maxRetries = 2, silentOn429 = false
   if (!currentEmail) return null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await mailFetch(url, {
         ...options,
         headers: {
           Authorization: `Bearer ${currentEmail.token}`,
@@ -1304,7 +1408,7 @@ async function fetchInbox({ manual = false } = {}) {
   let partialReason = null; // 'page_error' | 'max_pages' | 'bad_data'
 
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages?page=${page}`);
+    const result = await apiFetch(`${currentEmail.apiBase}/messages?page=${page}`);
     if (!result) return;
     if (page === 1) firstResult = result;
     if (result.error) {
@@ -1412,7 +1516,7 @@ async function prefetchBodies(address, messages) {
       const cacheNow = getMessageCache(address);
       if (cacheNow[m.id]?._cachedFull) continue;
 
-      const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${m.id}`);
+      const result = await apiFetch(`${currentEmail.apiBase}/messages/${m.id}`);
       if (!result) break;
 
       const cache = getMessageCache(address);
@@ -1500,7 +1604,7 @@ async function deleteMail(id, { showSuccessToast = true } = {}) {
   if (!currentEmail || !id) return false;
   // 서버에 DELETE 요청 (실패해도 로컬에서 삭제 진행)
   try {
-    await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`, { method: 'DELETE' });
+    await apiFetch(`${currentEmail.apiBase}/messages/${id}`, { method: 'DELETE' });
   } catch {}
   // 캐시에서도 제거
   const cache = getMessageCache(currentEmail.address);
@@ -1569,7 +1673,7 @@ async function markAsRead(id, itemEl) {
   renderHistory();
   // 이미 읽은 메일이거나 서버에서 삭제된 캐시본이면 PATCH 스킵 (불필요한 404 방지)
   if (alreadySeen || isCachedOnly) return;
-  await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`, {
+  await apiFetch(`${currentEmail.apiBase}/messages/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json' },
     body: JSON.stringify({ seen: true }),
@@ -1626,7 +1730,7 @@ async function readMessage(id, itemEl) {
       msg = cachedEntry;
       fromCache = cachedEntry._cachedOnly === true;
     } else {
-      const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`);
+      const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
       if (result && !result.error && result.data) {
         msg = result.data;
         // 본문도 캐시에 저장
@@ -1962,17 +2066,15 @@ async function downloadAttachment(msgId, att) {
   // downloadUrl이 상대경로면 apiBase 붙임
   let url = att.downloadUrl || `/messages/${msgId}/attachment/${att.id}`;
   if (!/^https?:\/\//.test(url)) {
-    url = proxyBase(currentEmail.apiBase) + (url.startsWith('/') ? url : '/' + url);
-  } else if (url.startsWith(currentEmail.apiBase)) {
-    url = proxyBase(currentEmail.apiBase) + url.slice(currentEmail.apiBase.length);
+    url = currentEmail.apiBase + (url.startsWith('/') ? url : '/' + url);
   }
   try {
-    let res = await fetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
+    let res = await mailFetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
     // 401: 토큰 재발급 후 재시도
     if (res.status === 401) {
       const ok = await refreshToken();
       if (ok) {
-        res = await fetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
+        res = await mailFetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
       }
     }
     if (!res.ok) {
