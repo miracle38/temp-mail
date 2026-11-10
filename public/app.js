@@ -1,6 +1,18 @@
 // 버전 이력 (최신이 위) — 버전 올릴 때 이 배열 맨 앞에 항목 추가 + 푸터 #appVersionLabel 텍스트 변경
 const VERSION_HISTORY = [
   {
+    version: '1.2.0',
+    date: '2026-11-10',
+    title: '메일 주소 생성 불가 문제 수정',
+    fixed: [
+      'mail.tm이 외부 사이트에서의 브라우저 직접 호출(CORS)을 막으면서 도메인 목록을 못 불러와 새 메일 주소가 생성되지 않던 문제 — 모든 메일 API 호출을 앱 서버 프록시(/api/mt)를 거치도록 변경',
+      '서버가 중단된 mail.gw를 도메인 목록에서 제외',
+    ],
+    changed: [
+      'mail.tm 요청 제한(분당 약 10회)에 맞춰 자동 새로고침 간격을 5초 → 10초로 변경',
+    ],
+  },
+  {
     version: '1.1.5',
     date: '2026-08-25',
     title: '로그인 직후 동기화 대기 시간 단축',
@@ -72,11 +84,17 @@ const VERSION_HISTORY = [
   },
 ];
 
-// 멀티 API 지원 (mail.tm + mail.gw)
+// 메일 API (mail.tm). mail.gw는 서버 중단으로 목록에서 제외(기존에 저장된 mail.gw 주소는 프록시 매핑만 유지)
 const API_PROVIDERS = [
   { name: 'mail.tm', base: 'https://api.mail.tm' },
-  { name: 'mail.gw', base: 'https://api.mail.gw' },
 ];
+
+// mail.tm이 외부 Origin의 브라우저 호출(CORS)을 막아서, 실제 요청은 우리 서버 프록시(/api/mt, /api/gw)로 보낸다.
+// 저장되는 apiBase는 원래 주소 그대로 두고(기존 히스토리 호환), 호출 직전에만 변환.
+const PROXY_MAP = { 'https://api.mail.tm': '/api/mt', 'https://api.mail.gw': '/api/gw' };
+function proxyBase(base) {
+  return PROXY_MAP[base] || base;
+}
 
 // 버전 정보 모달
 function renderVersionBody() {
@@ -117,7 +135,9 @@ function closeVersionModal() {
 // 상태
 let currentEmail = null;   // { address, password, token, apiBase }
 let refreshTimer = null;
-let countdown = 5;
+// mail.tm 요청 제한(IP당 분당 약 10회)에 걸리지 않도록 10초 간격
+const AUTO_REFRESH_SEC = 10;
+let countdown = AUTO_REFRESH_SEC;
 let domains = [];          // { domain, apiBase }[]
 let knownIds = new Set();
 let currentMailList = [];  // 현재 표시된 메일 목록 (정렬 순서)
@@ -369,7 +389,7 @@ async function refreshAllAddresses() {
     if (isExpired(h.retentionAt)) continue;
     try {
       // 토큰 발급
-      const tokenRes = await fetch(`${h.apiBase}/token`, {
+      const tokenRes = await fetch(`${proxyBase(h.apiBase)}/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: h.address, password: h.password }),
@@ -383,7 +403,7 @@ async function refreshAllAddresses() {
       const MAX_PAGES = 20;
       let fullSweep = false;
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const res = await fetch(`${h.apiBase}/messages?page=${page}`, {
+        const res = await fetch(`${proxyBase(h.apiBase)}/messages?page=${page}`, {
           headers: { Authorization: `Bearer ${tokenData.token}` },
         });
         if (!res.ok) break; // 부분 스윕: fullSweep 유지 (false)
@@ -602,7 +622,7 @@ async function restoreSession(saved) {
     // 이전 세션의 자동 새로고침 즉시 중단 (이전 계정 데이터로 덮어쓰기 방지)
     stopAutoRefresh();
 
-    const tokenRes = await fetch(`${saved.apiBase}/token`, {
+    const tokenRes = await fetch(`${proxyBase(saved.apiBase)}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address: saved.address, password: saved.password }),
@@ -964,7 +984,7 @@ async function loadDomains() {
   domains = [];
   const results = await Promise.allSettled(
     API_PROVIDERS.map(async (provider) => {
-      const res = await fetch(`${provider.base}/domains`);
+      const res = await fetch(`${proxyBase(provider.base)}/domains`);
       const data = await res.json();
       return (data['hydra:member'] || []).map(d => ({
         domain: d.domain,
@@ -1016,7 +1036,7 @@ async function safeJson(res) {
 // 계정 정보 조회 (retentionAt 포함)
 async function fetchAccountInfo(apiBase, token) {
   try {
-    const res = await fetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${proxyBase(apiBase)}/me`, { headers: { Authorization: `Bearer ${token}` } });
     return await safeJson(res);
   } catch { return null; }
 }
@@ -1040,7 +1060,7 @@ async function createAccount(address) {
   const password = randomString(16);
 
   // 계정 생성
-  const createRes = await fetch(`${apiBase}/accounts`, {
+  const createRes = await fetch(`${proxyBase(apiBase)}/accounts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -1052,7 +1072,7 @@ async function createAccount(address) {
   const createData = await safeJson(createRes);
 
   // 토큰 발급
-  const tokenRes = await fetch(`${apiBase}/token`, {
+  const tokenRes = await fetch(`${proxyBase(apiBase)}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, password }),
@@ -1217,7 +1237,7 @@ async function applyCustom() {
 async function refreshToken() {
   if (!currentEmail) return false;
   try {
-    const res = await fetch(`${currentEmail.apiBase}/token`, {
+    const res = await fetch(`${proxyBase(currentEmail.apiBase)}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address: currentEmail.address, password: currentEmail.password }),
@@ -1284,7 +1304,7 @@ async function fetchInbox({ manual = false } = {}) {
   let partialReason = null; // 'page_error' | 'max_pages' | 'bad_data'
 
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const result = await apiFetch(`${currentEmail.apiBase}/messages?page=${page}`);
+    const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages?page=${page}`);
     if (!result) return;
     if (page === 1) firstResult = result;
     if (result.error) {
@@ -1392,7 +1412,7 @@ async function prefetchBodies(address, messages) {
       const cacheNow = getMessageCache(address);
       if (cacheNow[m.id]?._cachedFull) continue;
 
-      const result = await apiFetch(`${currentEmail.apiBase}/messages/${m.id}`);
+      const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${m.id}`);
       if (!result) break;
 
       const cache = getMessageCache(address);
@@ -1480,7 +1500,7 @@ async function deleteMail(id, { showSuccessToast = true } = {}) {
   if (!currentEmail || !id) return false;
   // 서버에 DELETE 요청 (실패해도 로컬에서 삭제 진행)
   try {
-    await apiFetch(`${currentEmail.apiBase}/messages/${id}`, { method: 'DELETE' });
+    await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`, { method: 'DELETE' });
   } catch {}
   // 캐시에서도 제거
   const cache = getMessageCache(currentEmail.address);
@@ -1549,7 +1569,7 @@ async function markAsRead(id, itemEl) {
   renderHistory();
   // 이미 읽은 메일이거나 서버에서 삭제된 캐시본이면 PATCH 스킵 (불필요한 404 방지)
   if (alreadySeen || isCachedOnly) return;
-  await apiFetch(`${currentEmail.apiBase}/messages/${id}`, {
+  await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/merge-patch+json' },
     body: JSON.stringify({ seen: true }),
@@ -1606,7 +1626,7 @@ async function readMessage(id, itemEl) {
       msg = cachedEntry;
       fromCache = cachedEntry._cachedOnly === true;
     } else {
-      const result = await apiFetch(`${currentEmail.apiBase}/messages/${id}`);
+      const result = await apiFetch(`${proxyBase(currentEmail.apiBase)}/messages/${id}`);
       if (result && !result.error && result.data) {
         msg = result.data;
         // 본문도 캐시에 저장
@@ -1770,13 +1790,13 @@ window.addEventListener('popstate', () => {
 function startAutoRefresh() {
   stopAutoRefresh();
   if (!autoRefreshCheck.checked || !currentEmail) return;
-  countdown = 5;
+  countdown = AUTO_REFRESH_SEC;
   timerSpan.textContent = `${countdown}초 후 새로고침`;
   refreshTimer = setInterval(() => {
     countdown--;
     if (countdown <= 0) {
       fetchInbox();
-      countdown = 5;
+      countdown = AUTO_REFRESH_SEC;
     }
     timerSpan.textContent = `${countdown}초 후 새로고침`;
     updateRetentionDisplay();
@@ -1942,7 +1962,9 @@ async function downloadAttachment(msgId, att) {
   // downloadUrl이 상대경로면 apiBase 붙임
   let url = att.downloadUrl || `/messages/${msgId}/attachment/${att.id}`;
   if (!/^https?:\/\//.test(url)) {
-    url = currentEmail.apiBase + (url.startsWith('/') ? url : '/' + url);
+    url = proxyBase(currentEmail.apiBase) + (url.startsWith('/') ? url : '/' + url);
+  } else if (url.startsWith(currentEmail.apiBase)) {
+    url = proxyBase(currentEmail.apiBase) + url.slice(currentEmail.apiBase.length);
   }
   try {
     let res = await fetch(url, { headers: { Authorization: `Bearer ${currentEmail.token}` } });
